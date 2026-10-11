@@ -26,6 +26,8 @@ class TurboText(ctk.CTk, TkinterDnD.DnDWrapper):
         self.config = load_config()
         self.current_file = None
         self.modified = False
+        self._render_mode = False
+        self._render_widget = None
 
         theme_mode = THEMES.get(self.config["theme"], THEMES["dark"])["mode"]
         ctk.set_appearance_mode(theme_mode)
@@ -44,6 +46,7 @@ class TurboText(ctk.CTk, TkinterDnD.DnDWrapper):
         self._build_editor()
         self._apply_font()
         self._update_title()
+        self._update_view_menu_state()
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -70,6 +73,17 @@ class TurboText(ctk.CTk, TkinterDnD.DnDWrapper):
         edit_menu.add_command(label="Find...", accelerator="Ctrl+F", command=self._show_find)
         self._menu_bar.add_cascade(label="Edit", menu=edit_menu)
 
+        self._render_mode_var = tk.BooleanVar(value=False)
+        view_menu = tk.Menu(self._menu_bar, tearoff=False)
+        view_menu.add_checkbutton(
+            label="Render Mode (Markdown)",
+            accelerator="Ctrl+Shift+M",
+            variable=self._render_mode_var,
+            command=self._toggle_render_mode,
+        )
+        self._menu_bar.add_cascade(label="View", menu=view_menu)
+        self._view_menu = view_menu
+
         self._line_num_var = tk.BooleanVar(value=self.config.get("show_line_numbers", True))
         self._word_wrap_var = tk.BooleanVar(value=self.config.get("word_wrap", True))
 
@@ -83,6 +97,9 @@ class TurboText(ctk.CTk, TkinterDnD.DnDWrapper):
             command=self._toggle_word_wrap,
         )
         settings_menu.add_separator()
+        settings_menu.add_command(label="Add to Context Menu", command=self._add_context_menu)
+        settings_menu.add_command(label="Remove from Context Menu", command=self._remove_context_menu)
+        settings_menu.add_separator()
         settings_menu.add_command(label="Set Default App...", command=self._show_set_default)
         settings_menu.add_command(label="Customize...", command=self._show_customize)
         self._menu_bar.add_cascade(label="Settings", menu=settings_menu)
@@ -94,6 +111,7 @@ class TurboText(ctk.CTk, TkinterDnD.DnDWrapper):
         self.bind_all("<Control-Shift-S>", lambda e: self._save_as())
         self.bind_all("<Control-w>", lambda e: self._on_close())
         self.bind_all("<Control-f>", lambda e: self._show_find())
+        self.bind_all("<Control-Shift-M>", lambda e: self._toggle_render_mode_shortcut())
 
     # ── Editor ────────────────────────────────────────────────────────
 
@@ -317,11 +335,15 @@ class TurboText(ctk.CTk, TkinterDnD.DnDWrapper):
     def _new(self):
         if not self._check_save():
             return
+        if self._render_mode:
+            self._render_mode_var.set(False)
+            self._exit_render_mode()
         self._text.delete("1.0", "end")
         self.current_file = None
         self.modified = False
         self._text.edit_modified(False)
         self._update_title()
+        self._update_view_menu_state()
 
     def _open(self):
         if not self._check_save():
@@ -346,6 +368,10 @@ class TurboText(ctk.CTk, TkinterDnD.DnDWrapper):
             messagebox.showerror("Error", f"Could not open file:\n{e}")
             return
 
+        if self._render_mode:
+            self._render_mode_var.set(False)
+            self._exit_render_mode()
+
         self._text.delete("1.0", "end")
         self._text.insert("1.0", content)
         self._text.edit_modified(False)
@@ -355,6 +381,7 @@ class TurboText(ctk.CTk, TkinterDnD.DnDWrapper):
         save_config(self.config)
         self._update_title()
         self._apply_font()
+        self._update_view_menu_state()
 
     def _save(self):
         if self.current_file:
@@ -408,6 +435,23 @@ class TurboText(ctk.CTk, TkinterDnD.DnDWrapper):
         ctk.set_appearance_mode(theme_mode)
         self._apply_editor_colors()
         self._apply_font()
+        self._refresh_render_if_active()
+
+    def _add_context_menu(self):
+        from turbo_text.file_assoc import add_context_menu
+        result = add_context_menu()
+        if result:
+            messagebox.showinfo("Context Menu", "'Open with TurboText' added to context menu.")
+        else:
+            messagebox.showinfo("Context Menu", "Requested admin elevation (check UAC prompt).")
+
+    def _remove_context_menu(self):
+        from turbo_text.file_assoc import remove_context_menu
+        result = remove_context_menu()
+        if result:
+            messagebox.showinfo("Context Menu", "'Open with TurboText' removed from context menu.")
+        else:
+            messagebox.showinfo("Context Menu", "Requested admin elevation (check UAC prompt).")
 
     def _show_set_default(self):
         from turbo_text.dialogs import SetDefaultDialog
@@ -432,6 +476,117 @@ class TurboText(ctk.CTk, TkinterDnD.DnDWrapper):
             from turbo_text.markdown import ALL_TAGS
             for tag in ALL_TAGS + ["inline_code_light"]:
                 self._text.tag_remove(tag, "1.0", "end")
+
+    # ── Render mode (Markdown) ───────────────────────────────────────
+
+    def _toggle_render_mode_shortcut(self):
+        if not self._is_markdown():
+            return
+        self._render_mode_var.set(not self._render_mode_var.get())
+        self._toggle_render_mode()
+
+    def _toggle_render_mode(self):
+        if not self._is_markdown():
+            self._render_mode_var.set(False)
+            return
+        if self._render_mode_var.get():
+            self._enter_render_mode()
+        else:
+            self._exit_render_mode()
+
+    def _md_to_html(self, text):
+        import markdown as md
+        bg, fg, mode = self._resolve_colors()
+        body = md.markdown(
+            text,
+            extensions=["tables", "fenced_code", "sane_lists", "nl2br"],
+        )
+        link_color = "#569cd6" if mode == "dark" else "#0066cc"
+        code_bg = "#2d2d2d" if mode == "dark" else "#e8e8e8"
+        code_fg = "#ce9178" if mode == "dark" else "#b5200d"
+        border = "#444" if mode == "dark" else "#ccc"
+        return (
+            f"<html><body style='background:{bg};color:{fg};"
+            f"font-family:{self.config['font_family']};"
+            f"font-size:{int(self.config['font_size'])}pt;'>"
+            f"<style>"
+            f"a {{ color:{link_color}; }}"
+            f"code, pre {{ background:{code_bg}; color:{code_fg};"
+            f" font-family:Consolas,monospace; padding:2px 4px; }}"
+            f"pre {{ padding:8px; }}"
+            f"table {{ border-collapse:collapse; }}"
+            f"th, td {{ border:1px solid {border}; padding:4px 8px; }}"
+            f"blockquote {{ border-left:3px solid {border};"
+            f" margin:0; padding:0 12px; color:#6a9955; }}"
+            f"hr {{ border:0; border-top:1px solid {border}; }}"
+            f"</style>"
+            f"{body}</body></html>"
+        )
+
+    def _enter_render_mode(self):
+        try:
+            from tkinterweb import HtmlFrame
+        except Exception as e:
+            messagebox.showerror("Render Mode", f"Missing deps:\n{e}")
+            self._render_mode_var.set(False)
+            return
+
+        text = self._text.get("1.0", "end-1c")
+        html = self._md_to_html(text)
+
+        if self._render_widget is None:
+            self._render_widget = HtmlFrame(
+                self._editor_frame,
+                messages_enabled=False,
+                vertical_scrollbar=True,
+                horizontal_scrollbar=False,
+            )
+            base_dir = os.path.dirname(self.current_file) if self.current_file else os.getcwd()
+            try:
+                self._render_widget.load_html(html, base_url=f"file:///{base_dir}/")
+            except TypeError:
+                self._render_widget.load_html(html)
+        else:
+            base_dir = os.path.dirname(self.current_file) if self.current_file else os.getcwd()
+            try:
+                self._render_widget.load_html(html, base_url=f"file:///{base_dir}/")
+            except TypeError:
+                self._render_widget.load_html(html)
+
+        self._scrollbar.pack_forget()
+        self._line_numbers.pack_forget()
+        self._text.pack_forget()
+        self._render_widget.pack(side="left", fill="both", expand=True)
+        self._render_mode = True
+
+    def _exit_render_mode(self):
+        if self._render_widget is not None:
+            self._render_widget.pack_forget()
+        self._scrollbar.pack(side="right", fill="y")
+        if self.config.get("show_line_numbers", True):
+            self._line_numbers.pack(side="left", fill="y")
+        self._text.pack(side="left", fill="both", expand=True)
+        self._render_mode = False
+
+    def _refresh_render_if_active(self):
+        if self._render_mode and self._render_widget is not None:
+            text = self._text.get("1.0", "end-1c")
+            html = self._md_to_html(text)
+            base_dir = os.path.dirname(self.current_file) if self.current_file else os.getcwd()
+            try:
+                self._render_widget.load_html(html, base_url=f"file:///{base_dir}/")
+            except TypeError:
+                self._render_widget.load_html(html)
+
+    def _update_view_menu_state(self):
+        try:
+            state = "normal" if self._is_markdown() else "disabled"
+            self._view_menu.entryconfig(0, state=state)
+        except Exception:
+            pass
+
+    def _check_save_silent(self):
+        return not self.modified
 
     def _on_modified(self, event=None):
         if self._text.edit_modified():

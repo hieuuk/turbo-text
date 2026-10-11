@@ -60,3 +60,49 @@ def set_default_for(ext):
     SHCNF_IDLIST = 0x0000
     windll.shell32.SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None)
     return True
+
+
+def add_context_menu():
+    """Add 'Open with TurboText' to the Windows right-click context menu for all files."""
+    if not is_admin():
+        script = get_exe_path()
+        run_as_admin([script, "--add-context-menu"])
+        return False
+
+    exe = get_exe_path()
+    if not getattr(sys, "frozen", False):
+        command = f'"{sys.executable}" "{exe}" "%1"'
+    else:
+        command = f'"{exe}" "%1"'
+
+    key_path = r"*\shell\TurboText"
+    with winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, key_path) as key:
+        winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "Open with TurboText")
+        winreg.SetValueEx(key, "Icon", 0, winreg.REG_SZ, exe)
+
+    with winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, key_path + r"\command") as key:
+        winreg.SetValueEx(key, "", 0, winreg.REG_SZ, command)
+
+    SHCNE_ASSOCCHANGED = 0x08000000
+    SHCNF_IDLIST = 0x0000
+    ctypes.windll.shell32.SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None)
+    return True
+
+
+def remove_context_menu():
+    """Remove 'Open with TurboText' from the Windows right-click context menu."""
+    if not is_admin():
+        script = get_exe_path()
+        run_as_admin([script, "--remove-context-menu"])
+        return False
+
+    try:
+        winreg.DeleteKey(winreg.HKEY_CLASSES_ROOT, r"*\shell\TurboText\command")
+        winreg.DeleteKey(winreg.HKEY_CLASSES_ROOT, r"*\shell\TurboText")
+    except FileNotFoundError:
+        pass
+
+    SHCNE_ASSOCCHANGED = 0x08000000
+    SHCNF_IDLIST = 0x0000
+    ctypes.windll.shell32.SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None)
+    return True
