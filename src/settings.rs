@@ -1,14 +1,59 @@
+use crate::format::Format;
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::PathBuf;
 
+/// Extensions offered for file association out of the box (editable in the settings dialog).
+pub const DEFAULT_ASSOC_EXTS: [&str; 17] = [
+    ".env",
+    ".json",
+    ".md",
+    ".toml",
+    ".ini",
+    ".yaml",
+    ".yml",
+    ".txt",
+    ".log",
+    ".conf",
+    ".cfg",
+    ".config",
+    ".properties",
+    ".gitignore",
+    ".editorconfig",
+    ".csv",
+    ".xml",
+];
+
+const THEMES: [&str; 3] = ["system", "light", "dark"];
+const FONTS: [&str; 2] = ["monospace", "proportional"];
+const MODES: [&str; 2] = ["view", "edit"];
+const TAB_SPACES: [u8; 4] = [0, 2, 4, 8];
+const WINDOW_RANGE: std::ops::RangeInclusive<f32> = 300.0..=10000.0;
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Settings {
-    pub wrap: bool,
-    pub theme: String,
+    // editor
     pub font_size: f32,
+    pub wrap: bool,
     pub show_line_numbers: bool,
+    pub tab_spaces: u8,
+    pub highlight: bool,
+    pub large_file_mb: u64,
+    pub editor_font: String,
+    // appearance
+    pub theme: String,
+    pub ui_scale: f32,
+    // behavior
+    pub open_json: String,
+    pub open_markdown: String,
+    pub open_other: String,
+    pub confirm_close: bool,
+    pub remember_window: bool,
+    pub window_w: f32,
+    pub window_h: f32,
+    // files and privacy
+    pub assoc_exts: Vec<String>,
     pub telemetry: bool,
     pub telemetry_max_kb: u64,
     pub telemetry_max_days: u32,
@@ -17,10 +62,23 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            wrap: false,
-            theme: "system".into(),
             font_size: 14.0,
+            wrap: false,
             show_line_numbers: true,
+            tab_spaces: 0,
+            highlight: true,
+            large_file_mb: 5,
+            editor_font: "monospace".into(),
+            theme: "system".into(),
+            ui_scale: 1.0,
+            open_json: "view".into(),
+            open_markdown: "view".into(),
+            open_other: "edit".into(),
+            confirm_close: true,
+            remember_window: true,
+            window_w: 900.0,
+            window_h: 650.0,
+            assoc_exts: DEFAULT_ASSOC_EXTS.iter().map(|e| e.to_string()).collect(),
             telemetry: true,
             telemetry_max_kb: 2048,
             telemetry_max_days: 90,
@@ -28,8 +86,76 @@ impl Default for Settings {
     }
 }
 
-/// Per-field parsing: an invalid or missing value falls back to its own default and never
-/// discards its neighbours (so a bad `theme` can't silently undo `telemetry = false`).
+impl Settings {
+    /// Whether a file of this format should open in view mode (before the empty-file rule).
+    pub fn start_in_view(&self, fmt: Format) -> bool {
+        let mode = match fmt {
+            Format::Json => &self.open_json,
+            Format::Markdown => &self.open_markdown,
+            _ => &self.open_other,
+        };
+        mode == "view"
+    }
+
+    /// Window size to start with, or `None` to use the built-in default.
+    pub fn window_size(&self) -> Option<(f32, f32)> {
+        (self.remember_window
+            && WINDOW_RANGE.contains(&self.window_w)
+            && WINDOW_RANGE.contains(&self.window_h))
+        .then_some((self.window_w, self.window_h))
+    }
+
+    pub fn reset_editor(&mut self) {
+        let d = Settings::default();
+        self.font_size = d.font_size;
+        self.wrap = d.wrap;
+        self.show_line_numbers = d.show_line_numbers;
+        self.tab_spaces = d.tab_spaces;
+        self.highlight = d.highlight;
+        self.large_file_mb = d.large_file_mb;
+        self.editor_font = d.editor_font;
+    }
+
+    pub fn reset_appearance(&mut self) {
+        let d = Settings::default();
+        self.theme = d.theme;
+        self.ui_scale = d.ui_scale;
+    }
+
+    pub fn reset_behavior(&mut self) {
+        let d = Settings::default();
+        self.open_json = d.open_json;
+        self.open_markdown = d.open_markdown;
+        self.open_other = d.open_other;
+        self.confirm_close = d.confirm_close;
+        self.remember_window = d.remember_window;
+        self.window_w = d.window_w;
+        self.window_h = d.window_h;
+    }
+
+    pub fn reset_files_privacy(&mut self) {
+        let d = Settings::default();
+        self.assoc_exts = d.assoc_exts;
+        self.telemetry = d.telemetry;
+        self.telemetry_max_kb = d.telemetry_max_kb;
+        self.telemetry_max_days = d.telemetry_max_days;
+    }
+}
+
+/// Normalizes each entry with `assoc::normalize_ext`, drops invalid ones and duplicates, keeps order.
+pub fn normalize_ext_list(input: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for e in input {
+        let n = crate::assoc::normalize_ext(e);
+        if !n.is_empty() && !out.contains(&n) {
+            out.push(n);
+        }
+    }
+    out
+}
+
+/// Per-field parsing: an invalid or missing value falls back to its own default (clamped where a
+/// range exists) and never discards its neighbours (a bad `theme` can't undo `telemetry = false`).
 pub fn parse(s: &str) -> Settings {
     let d = Settings::default();
     let Ok(t) = s.parse::<toml::Table>() else {
@@ -41,20 +167,51 @@ pub fn parse(s: &str) -> Settings {
             .and_then(|v| v.as_integer())
             .and_then(|i| u64::try_from(i).ok())
     };
-    let font_size = t
-        .get("font_size")
-        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
-        .map(|f| f as f32)
-        .filter(|f| f.is_finite())
-        .map_or(d.font_size, |f| f.clamp(6.0, 72.0));
-    Settings {
-        wrap: flag("wrap", d.wrap),
-        theme: t
-            .get("theme")
+    let float = |k: &str| {
+        t.get(k)
+            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+            .map(|f| f as f32)
+            .filter(|f| f.is_finite())
+    };
+    let choice = |k: &str, allowed: &[&str], def: &str| {
+        t.get(k)
             .and_then(|v| v.as_str())
-            .map_or(d.theme, str::to_owned),
-        font_size,
+            .filter(|v| allowed.contains(v))
+            .unwrap_or(def)
+            .to_owned()
+    };
+    let assoc_exts = match t.get("assoc_exts").and_then(|v| v.as_array()) {
+        Some(items) => {
+            let strings: Vec<String> = items
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect();
+            normalize_ext_list(&strings)
+        }
+        None => d.assoc_exts.clone(),
+    };
+    let window = |k: &str, def: f32| float(k).filter(|f| WINDOW_RANGE.contains(f)).unwrap_or(def);
+    Settings {
+        font_size: float("font_size").map_or(d.font_size, |f| f.clamp(6.0, 72.0)),
+        wrap: flag("wrap", d.wrap),
         show_line_numbers: flag("show_line_numbers", d.show_line_numbers),
+        tab_spaces: uint("tab_spaces")
+            .and_then(|n| u8::try_from(n).ok())
+            .filter(|n| TAB_SPACES.contains(n))
+            .unwrap_or(d.tab_spaces),
+        highlight: flag("highlight", d.highlight),
+        large_file_mb: uint("large_file_mb").map_or(d.large_file_mb, |n| n.clamp(1, 100)),
+        editor_font: choice("editor_font", &FONTS, &d.editor_font),
+        theme: choice("theme", &THEMES, &d.theme),
+        ui_scale: float("ui_scale").map_or(d.ui_scale, |f| f.clamp(0.75, 2.0)),
+        open_json: choice("open_json", &MODES, &d.open_json),
+        open_markdown: choice("open_markdown", &MODES, &d.open_markdown),
+        open_other: choice("open_other", &MODES, &d.open_other),
+        confirm_close: flag("confirm_close", d.confirm_close),
+        remember_window: flag("remember_window", d.remember_window),
+        window_w: window("window_w", d.window_w),
+        window_h: window("window_h", d.window_h),
+        assoc_exts,
         telemetry: flag("telemetry", d.telemetry),
         telemetry_max_kb: uint("telemetry_max_kb").unwrap_or(d.telemetry_max_kb),
         telemetry_max_days: uint("telemetry_max_days")
@@ -138,6 +295,151 @@ mod tests {
         assert!(s.wrap);
         assert_eq!(s.theme, "system");
         assert_eq!(s.font_size, 14.0);
+    }
+
+    #[test]
+    fn new_keys_have_documented_defaults() {
+        let s = parse("");
+        assert_eq!(s.tab_spaces, 0);
+        assert!(s.highlight);
+        assert_eq!(s.large_file_mb, 5);
+        assert_eq!(s.editor_font, "monospace");
+        assert_eq!(s.ui_scale, 1.0);
+        assert_eq!(
+            (
+                s.open_json.as_str(),
+                s.open_markdown.as_str(),
+                s.open_other.as_str()
+            ),
+            ("view", "view", "edit")
+        );
+        assert!(s.confirm_close && s.remember_window);
+        assert_eq!((s.window_w, s.window_h), (900.0, 650.0));
+        assert_eq!(s.assoc_exts.len(), 17);
+        assert!(s.assoc_exts.contains(&".gitignore".to_string()));
+        assert!(s.assoc_exts.contains(&".env".to_string()));
+    }
+
+    #[test]
+    fn out_of_range_and_wrong_values_fall_back_per_field() {
+        let s = parse(
+            "tab_spaces = 3\nui_scale = 9.0\nlarge_file_mb = 0\neditor_font = \"comic\"\n\
+             theme = \"blue\"\nopen_json = \"x\"\nwindow_w = 5\nwindow_h = 99999\nconfirm_close = 1\n",
+        );
+        assert_eq!(s.tab_spaces, 0);
+        assert_eq!(s.ui_scale, 2.0);
+        assert_eq!(s.large_file_mb, 1);
+        assert_eq!(s.editor_font, "monospace");
+        assert_eq!(s.theme, "system");
+        assert_eq!(s.open_json, "view");
+        assert_eq!(s.window_w, 900.0);
+        assert_eq!(s.window_h, 650.0);
+        assert!(s.confirm_close, "wrong type keeps default");
+        assert_eq!(parse("ui_scale = 0.1").ui_scale, 0.75);
+        assert_eq!(parse("tab_spaces = 4").tab_spaces, 4);
+        assert_eq!(parse("tab_spaces = 8").tab_spaces, 8);
+        assert_eq!(parse("large_file_mb = 1000").large_file_mb, 100);
+        for bad in ["nan", "inf", "-inf", "\"2\""] {
+            let s = parse(&format!("ui_scale = {bad}"));
+            assert!((0.75..=2.0).contains(&s.ui_scale), "{bad}");
+        }
+    }
+
+    #[test]
+    fn good_values_survive_a_bad_neighbour() {
+        let s = parse("tab_spaces = 4\nui_scale = \"big\"\nhighlight = false\ntheme = \"dark\"\n");
+        assert_eq!(s.tab_spaces, 4);
+        assert!(!s.highlight);
+        assert_eq!(s.theme, "dark");
+        assert_eq!(s.ui_scale, 1.0);
+    }
+
+    #[test]
+    fn assoc_exts_are_normalized_or_defaulted() {
+        let s = parse("assoc_exts = [\"JSON\", \"json\", \".Md\", \"a b\", \"\", \".env\"]");
+        assert_eq!(s.assoc_exts, vec![".json", ".md", ".env"]);
+        assert_eq!(parse("assoc_exts = []").assoc_exts, Vec::<String>::new());
+        assert_eq!(parse("assoc_exts = \"x\"").assoc_exts.len(), 17);
+        assert_eq!(
+            parse("assoc_exts = [1, 2]").assoc_exts,
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn normalize_ext_list_dedupes_and_keeps_order() {
+        let input: Vec<String> = ["JSON", "json", ".Md", "a b", "", ".env", "md"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(normalize_ext_list(&input), vec![".json", ".md", ".env"]);
+        assert!(normalize_ext_list(&[]).is_empty());
+    }
+
+    #[test]
+    fn start_in_view_follows_open_settings() {
+        use crate::format::Format;
+        let d = Settings::default();
+        assert!(d.start_in_view(Format::Json));
+        assert!(d.start_in_view(Format::Markdown));
+        assert!(!d.start_in_view(Format::Env));
+        assert!(!d.start_in_view(Format::Config));
+        assert!(!d.start_in_view(Format::Plain));
+        let s = parse("open_json = \"edit\"\nopen_markdown = \"edit\"\nopen_other = \"view\"");
+        assert!(!s.start_in_view(Format::Json));
+        assert!(!s.start_in_view(Format::Markdown));
+        assert!(s.start_in_view(Format::Env));
+        assert!(s.start_in_view(Format::Plain));
+    }
+
+    #[test]
+    fn window_size_only_when_remembered_and_sane() {
+        let mut s = Settings::default();
+        assert_eq!(s.window_size(), Some((900.0, 650.0)));
+        s.remember_window = false;
+        assert_eq!(s.window_size(), None);
+        s.remember_window = true;
+        s.window_w = 1200.0;
+        s.window_h = 800.0;
+        assert_eq!(s.window_size(), Some((1200.0, 800.0)));
+    }
+
+    #[test]
+    fn group_resets_touch_only_their_group() {
+        let mut s = Settings {
+            font_size: 30.0,
+            theme: "dark".into(),
+            telemetry: false,
+            confirm_close: false,
+            ..Default::default()
+        };
+        s.reset_editor();
+        assert_eq!(s.font_size, 14.0);
+        assert_eq!(s.theme, "dark");
+        assert!(!s.telemetry);
+        s.reset_appearance();
+        assert_eq!(s.theme, "system");
+        assert!(!s.confirm_close);
+        s.reset_behavior();
+        assert!(s.confirm_close);
+        assert!(!s.telemetry);
+        s.reset_files_privacy();
+        assert!(s.telemetry);
+    }
+
+    #[test]
+    fn full_roundtrip_including_new_keys() {
+        let s = Settings {
+            tab_spaces: 4,
+            highlight: false,
+            editor_font: "proportional".into(),
+            ui_scale: 1.25,
+            open_other: "view".into(),
+            window_w: 1000.0,
+            assoc_exts: vec![".env".into(), ".log".into()],
+            ..Default::default()
+        };
+        assert_eq!(parse(&toml::to_string(&s).unwrap()), s);
     }
 
     #[test]
