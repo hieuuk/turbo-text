@@ -230,23 +230,42 @@ fn inline(line: &str, off: usize, start: usize, out: &mut Vec<Span>) {
     }
 }
 
-pub fn layout_job(text: &str, spans: &[Span], font: FontId, dark: bool) -> LayoutJob {
+/// Builds the colored text. `marks` are sorted, non-overlapping find matches (byte ranges);
+/// `current` indexes the match drawn in the stronger highlight.
+pub fn layout_job(
+    text: &str,
+    spans: &[Span],
+    marks: &[(usize, usize)],
+    current: Option<usize>,
+    font: FontId,
+    dark: bool,
+) -> LayoutJob {
     let mut job = LayoutJob::default();
     let plain = if dark { Color32::from_gray(210) } else { Color32::from_gray(40) };
-    let fmt = |color| TextFormat { font_id: font.clone(), color, ..Default::default() };
-    let mut pos = 0;
-    for s in spans {
-        if s.start < pos || s.end > text.len() || s.start >= s.end {
-            continue;
+    let mut cuts = vec![0, text.len()];
+    cuts.extend(spans.iter().flat_map(|s| [s.start, s.end]));
+    cuts.extend(marks.iter().flat_map(|m| [m.0, m.1]));
+    cuts.retain(|&c| c <= text.len() && text.is_char_boundary(c));
+    cuts.sort_unstable();
+    cuts.dedup();
+    let (mut si, mut mi) = (0, 0);
+    for w in cuts.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        while si < spans.len() && spans[si].end <= a {
+            si += 1;
         }
-        if s.start > pos {
-            job.append(&text[pos..s.start], 0.0, fmt(plain));
+        while mi < marks.len() && marks[mi].1 <= a {
+            mi += 1;
         }
-        job.append(&text[s.start..s.end], 0.0, fmt(color(s.kind, dark)));
-        pos = s.end;
-    }
-    if pos < text.len() {
-        job.append(&text[pos..], 0.0, fmt(plain));
+        let fg = spans.get(si).filter(|s| s.start <= a && b <= s.end).map_or(plain, |s| color(s.kind, dark));
+        let bg = match marks.get(mi) {
+            Some(m) if m.0 <= a && b <= m.1 => {
+                if current == Some(mi) { Color32::from_rgb(230, 140, 40) } else { Color32::from_rgba_unmultiplied(230, 200, 40, 110) }
+            }
+            _ => Color32::TRANSPARENT,
+        };
+        let fmt = TextFormat { font_id: font.clone(), color: fg, background: bg, ..Default::default() };
+        job.append(&text[a..b], 0.0, fmt);
     }
     job
 }
@@ -403,6 +422,33 @@ mod tests {
                 assert_valid(f, t);
             }
         }
+    }
+
+    #[test]
+    fn layout_job_marks_matches_with_background() {
+        let text = "ab cd ab";
+        let spans = tokenize(Format::Plain, text);
+        let marks = [(0, 2), (6, 8)];
+        let job = layout_job(text, &spans, &marks, Some(1), FontId::monospace(14.0), true);
+        assert_eq!(job.text, text);
+        let bg = |r: std::ops::Range<usize>| {
+            job.sections
+                .iter()
+                .find(|s| s.byte_range.start.0 == r.start && s.byte_range.end.0 == r.end)
+                .map(|s| s.format.background)
+        };
+        assert_ne!(bg(0..2), Some(Color32::TRANSPARENT));
+        assert_ne!(bg(6..8), Some(Color32::TRANSPARENT));
+        assert_ne!(bg(0..2), bg(6..8), "current match differs from others");
+        assert_eq!(bg(2..6), Some(Color32::TRANSPARENT));
+    }
+
+    #[test]
+    fn layout_job_handles_marks_inside_spans() {
+        let text = "{\"key\": 1}";
+        let spans = tokenize(Format::Json, text);
+        let job = layout_job(text, &spans, &[(2, 4)], None, FontId::monospace(14.0), false);
+        assert_eq!(job.text, text);
     }
 
     #[test]
