@@ -4,6 +4,7 @@ mod format;
 mod highlight;
 mod io;
 mod settings;
+mod telemetry;
 mod views;
 
 fn main() {
