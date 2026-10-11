@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+mod assoc;
 mod find;
 mod format;
 mod highlight;
