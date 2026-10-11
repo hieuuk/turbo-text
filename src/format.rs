@@ -29,10 +29,6 @@ pub fn detect(path: &Path) -> Format {
 }
 
 impl Format {
-    pub fn default_view(&self) -> bool {
-        matches!(self, Format::Json | Format::Markdown)
-    }
-
     pub fn name(&self) -> &'static str {
         match self {
             Format::Json => "json",
@@ -89,14 +85,5 @@ mod tests {
         assert_eq!(d("a.txt"), Format::Plain);
         assert_eq!(d("README"), Format::Plain);
         assert_eq!(d(""), Format::Plain);
-    }
-
-    #[test]
-    fn default_view_only_for_json_md() {
-        assert!(Format::Json.default_view());
-        assert!(Format::Markdown.default_view());
-        assert!(!Format::Env.default_view());
-        assert!(!Format::Config.default_view());
-        assert!(!Format::Plain.default_view());
     }
 }

@@ -95,7 +95,8 @@ fn main() -> eframe::Result {
         std::process::exit(code);
     }
 
-    let enabled = settings::load().telemetry;
+    let settings = settings::load();
+    let enabled = settings.telemetry;
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         telemetry::log_panic(&settings::dir(), &info.to_string(), enabled);
@@ -104,7 +105,11 @@ fn main() -> eframe::Result {
 
     let path = args.first().map(PathBuf::from);
     let mut viewport = eframe::egui::ViewportBuilder::default()
-        .with_inner_size([900.0, 650.0])
+        .with_inner_size(
+            settings
+                .window_size()
+                .map_or([900.0, 650.0], |(w, h)| [w, h]),
+        )
         .with_drag_and_drop(true);
     if let Some(icon) = window_icon() {
         viewport = viewport.with_icon(icon);

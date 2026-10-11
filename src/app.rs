@@ -10,10 +10,10 @@ use egui_commonmark::CommonMarkCache;
 use serde_json::{Value, json};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-/// Files above this size open without syntax highlighting.
-const LARGE_FILE: u64 = 5 * 1024 * 1024;
+/// Settings are written this long after the last change (and on exit), not on every frame.
+const SAVE_DEBOUNCE: Duration = Duration::from_millis(400);
 const ASSOC_EXTS: [&str; 6] = [".env", ".json", ".md", ".toml", ".ini", ".yaml"];
 
 type JsonResult = Result<Value, (usize, usize, String)>;
@@ -53,12 +53,32 @@ pub struct App {
     select: Option<(usize, usize)>,
     assoc_open: bool,
     assoc_sel: Vec<(String, bool)>,
+    /// Last settings written to disk / last settings applied to egui.
+    saved: Settings,
+    applied: Settings,
+    settings_changed_at: Option<Instant>,
+    /// Last known logical window size, stored on exit when `remember_window` is on.
+    win_size: Option<(f32, f32)>,
 }
 
 fn hash_of<T: Hash + ?Sized>(t: &T) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     t.hash(&mut h);
     h.finish()
+}
+
+/// True once the settings have been unchanged for the debounce period.
+fn save_due(since_last_change: Option<Duration>) -> bool {
+    since_last_change.is_some_and(|d| d >= SAVE_DEBOUNCE)
+}
+
+fn apply_visuals(ctx: &egui::Context, s: &Settings) {
+    ctx.set_theme(match s.theme.as_str() {
+        "dark" => egui::ThemePreference::Dark,
+        "light" => egui::ThemePreference::Light,
+        _ => egui::ThemePreference::System,
+    });
+    ctx.set_zoom_factor(s.ui_scale);
 }
 
 /// Status-bar text for the save state; `None` for a blank buffer that was never saved.
@@ -79,11 +99,7 @@ fn spawn_self(path: &Path) {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, path: Option<PathBuf>) -> Self {
         let settings = settings::load();
-        cc.egui_ctx.set_theme(match settings.theme.as_str() {
-            "dark" => egui::ThemePreference::Dark,
-            "light" => egui::ThemePreference::Light,
-            _ => egui::ThemePreference::System,
-        });
+        apply_visuals(&cc.egui_ctx, &settings);
         let tel = telemetry::init(&settings);
         let mut app = App {
             path: None,
@@ -94,6 +110,10 @@ impl App {
             fmt: Format::Plain,
             view: false,
             banner: None,
+            saved: settings.clone(),
+            applied: settings.clone(),
+            settings_changed_at: None,
+            win_size: None,
             settings,
             tel,
             hl: HlCache::default(),
@@ -141,7 +161,7 @@ impl App {
         }
         self.path = Some(path.to_path_buf());
         self.fmt = format::detect(path);
-        self.view = self.fmt.default_view() && !self.text.trim().is_empty();
+        self.view = self.settings.start_in_view(self.fmt) && !self.text.trim().is_empty();
         self.dirty = false;
         self.json = None;
         self.find.matches.clear();
@@ -164,7 +184,7 @@ impl App {
         self.banner = if lossy {
             self.tel.event("problem", json!({"kind": "non_utf8"}));
             Some("File is not valid UTF-8: opened read-only, saving is disabled.".into())
-        } else if size > LARGE_FILE {
+        } else if size > self.settings.large_file_mb * 1024 * 1024 {
             self.tel.event("problem", json!({"kind": "large_file"}));
             Some("Large file: syntax highlighting is off.".into())
         } else {
@@ -240,7 +260,6 @@ impl App {
 
     fn toggle_wrap(&mut self, via: &str) {
         self.settings.wrap = !self.settings.wrap;
-        let _ = settings::save(&self.settings);
         self.tel
             .event("toggle_wrap", json!({"to": self.settings.wrap, "via": via}));
     }
@@ -365,6 +384,34 @@ impl App {
         }
     }
 
+    /// Applies settings changes the frame they happen, debounces the file write, tracks window size.
+    fn track_settings(&mut self, ctx: &egui::Context) {
+        if let Some(r) = ctx.input(|i| i.viewport().inner_rect) {
+            // inner_rect is in zoomed points; store the logical size the OS window actually has
+            let z = ctx.zoom_factor();
+            let (w, h) = ((r.width() * z).round(), (r.height() * z).round());
+            if (300.0..=10000.0).contains(&w) && (300.0..=10000.0).contains(&h) {
+                self.win_size = Some((w, h));
+            }
+        }
+        if self.settings != self.applied {
+            apply_visuals(ctx, &self.settings);
+            self.applied = self.settings.clone();
+            self.settings_changed_at = Some(Instant::now());
+        }
+        if self.settings_changed_at.is_some() {
+            if save_due(self.settings_changed_at.map(|t| t.elapsed())) {
+                match settings::save(&self.settings) {
+                    Ok(()) => self.saved = self.settings.clone(),
+                    Err(e) => self.banner = Some(format!("Could not save settings: {e}")),
+                }
+                self.settings_changed_at = None;
+            } else {
+                ctx.request_repaint_after(SAVE_DEBOUNCE);
+            }
+        }
+    }
+
     fn update_title(&mut self, ctx: &egui::Context) {
         let name = self
             .path
@@ -435,7 +482,6 @@ impl App {
                 {
                     ui.close();
                     self.settings.show_line_numbers = !self.settings.show_line_numbers;
-                    let _ = settings::save(&self.settings);
                 }
             });
             ui.menu_button("Search", |ui| {
@@ -607,7 +653,8 @@ impl App {
             line_numbers: self.settings.show_line_numbers,
             font_size: self.settings.font_size,
             read_only: self.lossy || self.view,
-            highlight: (self.text.len() as u64) <= LARGE_FILE,
+            highlight: self.settings.highlight
+                && (self.text.len() as u64) <= self.settings.large_file_mb * 1024 * 1024,
             font_proportional: self.settings.editor_font == "proportional",
             tab_spaces: self.settings.tab_spaces as usize,
             marks,
@@ -625,7 +672,7 @@ impl eframe::App for App {
         self.handle_input(ctx);
         self.update_title(ctx);
         if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close {
-            if self.confirm_discard() {
+            if !self.settings.confirm_close || self.confirm_discard() {
                 self.allow_close = true;
             } else {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -634,6 +681,7 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.track_settings(ui.ctx());
         if !self.started_logged {
             self.started_logged = true;
             self.tel.event(
@@ -704,6 +752,15 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if self.settings.remember_window
+            && let Some((w, h)) = self.win_size
+        {
+            self.settings.window_w = w;
+            self.settings.window_h = h;
+        }
+        if self.settings != self.saved {
+            let _ = settings::save(&self.settings);
+        }
         self.flush_mode_time();
         self.tel.shutdown();
     }
@@ -711,7 +768,17 @@ impl eframe::App for App {
 
 #[cfg(test)]
 mod tests {
-    use super::save_label;
+    use super::{SAVE_DEBOUNCE, save_due, save_label};
+    use std::time::Duration;
+
+    #[test]
+    fn settings_save_waits_for_quiet_period() {
+        assert!(!save_due(None));
+        assert!(!save_due(Some(Duration::from_millis(0))));
+        assert!(!save_due(Some(SAVE_DEBOUNCE - Duration::from_millis(1))));
+        assert!(save_due(Some(SAVE_DEBOUNCE)));
+        assert!(save_due(Some(Duration::from_secs(60))));
+    }
 
     #[test]
     fn unsaved_changes_are_called_out() {
