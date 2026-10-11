@@ -392,6 +392,15 @@ impl App {
         }
     }
 
+    /// Writes settings without clobbering hand-edits: overlays only this session's changes on the
+    /// file as it is now (see `settings::merge_for_save`).
+    fn save_settings(&mut self) -> std::io::Result<()> {
+        let merged = settings::merge_for_save(&settings::load(), &self.saved, &self.settings);
+        settings::save(&merged)?;
+        self.saved = self.settings.clone();
+        Ok(())
+    }
+
     /// Applies settings changes the frame they happen, debounces the file write, tracks window size.
     fn track_settings(&mut self, ctx: &egui::Context) {
         if let Some(r) = ctx.input(|i| i.viewport().inner_rect) {
@@ -409,9 +418,8 @@ impl App {
         }
         if self.settings_changed_at.is_some() {
             if save_due(self.settings_changed_at.map(|t| t.elapsed())) {
-                match settings::save(&self.settings) {
-                    Ok(()) => self.saved = self.settings.clone(),
-                    Err(e) => self.banner = Some(format!("Could not save settings: {e}")),
+                if let Err(e) = self.save_settings() {
+                    self.banner = Some(format!("Could not save settings: {e}"));
                 }
                 self.settings_changed_at = None;
             } else {
@@ -451,7 +459,7 @@ impl App {
                 ui.separator();
                 if ui.button("Open settings file").clicked() {
                     ui.close();
-                    let _ = settings::save(&self.settings);
+                    let _ = self.save_settings();
                     spawn_self(&settings::path());
                 }
                 if ui.button("Settings…    Ctrl+,").clicked() {
@@ -735,7 +743,7 @@ impl eframe::App for App {
             self.settings.window_h = h;
         }
         if self.settings != self.saved {
-            let _ = settings::save(&self.settings);
+            let _ = self.save_settings();
         }
         self.flush_mode_time();
         self.tel.shutdown();

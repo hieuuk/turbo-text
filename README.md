@@ -26,7 +26,7 @@ One file per window. Open another file with `Ctrl+O` or drag it onto the window.
 | `Ctrl+F` / `Ctrl+H` | Find / find and replace (plain text, optional match case) |
 | `Alt+Z` | Toggle word wrap |
 
-`.json` and `.md` open in view mode (collapsible tree / rendered Markdown). Everything else opens in the editor with syntax highlighting and line numbers. Invalid JSON shows the error with line and column. Files that are not valid UTF-8 open read-only so they can't be corrupted. Files over 5 MB open without highlighting.
+`.json` and `.md` open in view mode (collapsible tree / rendered Markdown). Everything else opens in the editor with syntax highlighting and line numbers. Invalid JSON shows the error with line and column. Files that are not valid UTF-8 open read-only so they can't be corrupted. Files over `large_file_mb` (5 by default) open without highlighting.
 
 ## Settings
 

@@ -1,7 +1,7 @@
 # Build the release exe, install it to a stable per-user path, and (re)register file associations.
 # Safe to re-run; use it after every release build. No admin needed.
 param(
-    [string[]]$Exts = @('.env', '.json', '.md', '.toml', '.ini', '.yaml'),
+    [string[]]$Exts = @('.env', '.json', '.md', '.toml', '.ini', '.yaml', '.yml', '.txt', '.log', '.conf', '.cfg', '.config', '.properties', '.gitignore', '.editorconfig', '.csv', '.xml'),
     [switch]$Associate   # re-register associations (always done on first install)
 )
 $ErrorActionPreference = 'Stop'

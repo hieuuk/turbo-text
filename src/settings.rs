@@ -220,6 +220,19 @@ pub fn parse(s: &str) -> Settings {
     }
 }
 
+/// What to write when saving: the file as it is on disk now, overlaid with only the keys this
+/// session changed (`current` vs `saved`). Keeps hand-edits made in another window or editor.
+pub fn merge_for_save(disk: &Settings, saved: &Settings, current: &Settings) -> Settings {
+    let table = |s: &Settings| toml::Table::try_from(s).unwrap_or_default();
+    let (mut out, saved_t) = (table(disk), table(saved));
+    for (k, v) in table(current) {
+        if saved_t.get(&k) != Some(&v) {
+            out.insert(k, v);
+        }
+    }
+    parse(&toml::to_string(&out).unwrap_or_default())
+}
+
 pub fn dir() -> PathBuf {
     std::env::var_os("APPDATA")
         .map(PathBuf::from)
@@ -425,6 +438,57 @@ mod tests {
         assert!(!s.telemetry);
         s.reset_files_privacy();
         assert!(s.telemetry);
+    }
+
+    #[test]
+    fn merge_keeps_external_edits_to_fields_this_session_did_not_change() {
+        let saved = Settings::default();
+        let disk = Settings {
+            theme: "dark".into(),
+            tab_spaces: 4,
+            ..Default::default()
+        };
+        let current = Settings {
+            wrap: true,
+            ..Default::default()
+        };
+        let m = merge_for_save(&disk, &saved, &current);
+        assert_eq!(m.theme, "dark", "hand-edit on disk survives");
+        assert_eq!(m.tab_spaces, 4);
+        assert!(m.wrap, "this session's change is kept");
+    }
+
+    #[test]
+    fn merge_prefers_this_sessions_change_when_both_changed_the_same_key() {
+        let saved = Settings::default();
+        let disk = Settings {
+            theme: "dark".into(),
+            ..Default::default()
+        };
+        let current = Settings {
+            theme: "light".into(),
+            ..Default::default()
+        };
+        assert_eq!(merge_for_save(&disk, &saved, &current).theme, "light");
+    }
+
+    #[test]
+    fn merge_with_no_session_changes_is_just_the_disk_state() {
+        let saved = Settings::default();
+        let disk = Settings {
+            font_size: 20.0,
+            assoc_exts: vec![".env".into()],
+            ..Default::default()
+        };
+        assert_eq!(merge_for_save(&disk, &saved, &saved.clone()), disk);
+        let current = Settings {
+            assoc_exts: vec![".log".into()],
+            ..Default::default()
+        };
+        assert_eq!(
+            merge_for_save(&disk, &saved, &current).assoc_exts,
+            vec![".log".to_string()]
+        );
     }
 
     #[test]

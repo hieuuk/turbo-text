@@ -70,7 +70,7 @@ pub fn show(ui: &mut Ui, text: &mut String, o: &Opts, cache: &mut HlCache) -> bo
     if o.tab_spaces > 0
         && !o.read_only
         && ui.memory(|m| m.has_focus(id))
-        && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+        && ui.input_mut(consume_plain_tab)
     {
         let mut state = TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
         if let Some(r) = state.cursor.char_range() {
@@ -149,6 +149,12 @@ pub fn show(ui: &mut Ui, text: &mut String, o: &Opts, cache: &mut HlCache) -> bo
     changed
 }
 
+/// Consumes a Tab press unless Shift is held: `consume_key` ignores an extra Shift, which would turn
+/// Shift+Tab into an indent instead of egui's built-in de-indent.
+fn consume_plain_tab(i: &mut egui::InputState) -> bool {
+    !i.modifiers.shift && i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)
+}
+
 /// Replaces the selection (char indices, any order, clamped) with a tab: spaces up to the next
 /// multiple of `spaces` columns (`spaces == 0` inserts a real tab). Returns the new cursor char index.
 pub fn indent_insert(text: &mut String, sel: (usize, usize), spaces: usize) -> usize {
@@ -196,7 +202,51 @@ fn paint_gutter(ui: &Ui, galley: &egui::Galley, origin: egui::Pos2, gutter_w: f3
 
 #[cfg(test)]
 mod tests {
-    use super::indent_insert;
+    use super::{consume_plain_tab, indent_insert};
+    use eframe::egui::{self, Event, Key, Modifiers, RawInput};
+
+    fn tab_event(modifiers: Modifiers) -> RawInput {
+        RawInput {
+            events: vec![
+                Event::ModifiersChanged(modifiers),
+                Event::Key {
+                    key: Key::Tab,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                },
+            ],
+            ..Default::default()
+        }
+    }
+
+    fn consumed(modifiers: Modifiers) -> (bool, bool) {
+        let ctx = egui::Context::default();
+        let mut result = (false, false);
+        let mut out = ctx.run_ui(tab_event(modifiers), |ui| {
+            let ctx = ui.ctx();
+            result.0 = ctx.input_mut(consume_plain_tab);
+            // is the Tab key event still available to egui's own handling?
+            result.1 = ctx.input(|i| {
+                i.events
+                    .iter()
+                    .any(|e| matches!(e, Event::Key { key: Key::Tab, .. }))
+            });
+        });
+        out.textures_delta.clear();
+        result
+    }
+
+    #[test]
+    fn plain_tab_is_consumed_but_shift_tab_is_left_for_egui_to_dedent() {
+        assert_eq!(consumed(Modifiers::NONE), (true, false));
+        assert_eq!(
+            consumed(Modifiers::SHIFT),
+            (false, true),
+            "Shift+Tab must stay unconsumed"
+        );
+    }
 
     fn run(text: &str, sel: (usize, usize), spaces: usize) -> (String, usize) {
         let mut t = text.to_string();
