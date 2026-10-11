@@ -30,17 +30,24 @@ One file per window. Open another file with `Ctrl+O` or drag it onto the window.
 
 ## Settings
 
-`%APPDATA%\turbo-text\settings.toml` (File > Open settings file). Missing or invalid values fall back to defaults.
+Open **File > Settings…** (`Ctrl+,`). Changes apply instantly and are saved automatically; each group has "Reset this group to defaults". The file is `%APPDATA%\turbo-text\settings.toml` (File > Open settings file) and can also be edited by hand: every key is validated on its own, so an invalid or out-of-range value falls back to that key's default and never affects the others.
 
-```toml
-wrap = false
-theme = "system"          # system | light | dark
-font_size = 14.0
-show_line_numbers = true
-telemetry = true
-telemetry_max_kb = 2048
-telemetry_max_days = 90
-```
+| Key | Values (default) | Applies |
+|---|---|---|
+| `font_size` | 6-72 (14) | live |
+| `editor_font` | `monospace` / `proportional` | live |
+| `wrap`, `show_line_numbers`, `highlight` | bool (false, true, true) | live |
+| `tab_spaces` | 0 = tab character, 2, 4, 8 (0) | live |
+| `large_file_mb` | 1-100 (5): highlighting turns off above this size | live |
+| `theme` | `system` / `light` / `dark` | live |
+| `ui_scale` | 0.75-2.0 (1.0) | live |
+| `open_json`, `open_markdown`, `open_other` | `view` / `edit` (view, view, edit) | next file opened |
+| `confirm_close` | bool (true): ask before closing with unsaved changes | live |
+| `remember_window`, `window_w`, `window_h` | bool (true), size in 300-10000 | next launch |
+| `assoc_exts` | list of extensions offered for association | on Apply |
+| `telemetry`, `telemetry_max_kb`, `telemetry_max_days` | true, 2048, 90 | next launch |
+
+Default association list: `.env .json .md .toml .ini .yaml .yml .txt .log .conf .cfg .config .properties .gitignore .editorconfig .csv .xml`. Add or remove entries in the settings dialog (Files and privacy), tick the ones you want and press "Apply associations".
 
 ## Usage log (local only)
 
@@ -48,7 +55,7 @@ With `telemetry = true`, TurboText appends small JSON events to `%APPDATA%\turbo
 
 ## File associations
 
-`--associate` (or File > File associations) registers TurboText under `HKCU\Software\Classes` and sets itself as an extension's default only when none exists. Windows keeps the default-app choice behind a confirmation, so the Default apps settings page opens afterwards.
+`--associate` (or Settings > Files and privacy > Apply associations) registers TurboText under `HKCU\Software\Classes` and sets itself as an extension's default only when none exists. Windows keeps the default-app choice behind a confirmation, so the Default apps settings page opens afterwards.
 
 ## Build
 
