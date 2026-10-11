@@ -3,6 +3,7 @@ use crate::find;
 use crate::format::{self, Format};
 use crate::io::{self, Eol};
 use crate::settings::{self, Settings};
+use crate::settings_ui::{AssocRequest, SettingsUi};
 use crate::telemetry::{self, Telemetry};
 use crate::{assoc, views};
 use eframe::egui::{self, Key, Modifiers, RichText, TextEdit};
@@ -14,7 +15,6 @@ use std::time::{Duration, Instant};
 
 /// Settings are written this long after the last change (and on exit), not on every frame.
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(400);
-const ASSOC_EXTS: [&str; 6] = [".env", ".json", ".md", ".toml", ".ini", ".yaml"];
 
 type JsonResult = Result<Value, (usize, usize, String)>;
 
@@ -51,8 +51,7 @@ pub struct App {
     last_title: String,
     allow_close: bool,
     select: Option<(usize, usize)>,
-    assoc_open: bool,
-    assoc_sel: Vec<(String, bool)>,
+    settings_ui: SettingsUi,
     /// Last settings written to disk / last settings applied to egui.
     saved: Settings,
     applied: Settings,
@@ -125,8 +124,7 @@ impl App {
             last_title: String::new(),
             allow_close: false,
             select: None,
-            assoc_open: false,
-            assoc_sel: Vec::new(),
+            settings_ui: SettingsUi::default(),
         };
         if let Some(p) = path {
             app.load(&p, "cli");
@@ -345,7 +343,7 @@ impl App {
     }
 
     fn handle_input(&mut self, ctx: &egui::Context) {
-        let (save, open, toggle, find, replace, wrap, esc) = ctx.input_mut(|i| {
+        let (save, open, toggle, find, replace, wrap, settings_key, esc) = ctx.input_mut(|i| {
             (
                 i.consume_key(Modifiers::COMMAND, Key::S),
                 i.consume_key(Modifiers::COMMAND, Key::O),
@@ -353,7 +351,9 @@ impl App {
                 i.consume_key(Modifiers::COMMAND, Key::F),
                 i.consume_key(Modifiers::COMMAND, Key::H),
                 i.consume_key(Modifiers::ALT, Key::Z),
-                self.find.open && i.consume_key(Modifiers::NONE, Key::Escape),
+                i.consume_key(Modifiers::COMMAND, Key::Comma),
+                (self.find.open || self.settings_ui.open)
+                    && i.consume_key(Modifiers::NONE, Key::Escape),
             )
         });
         if save {
@@ -374,8 +374,16 @@ impl App {
         if wrap {
             self.toggle_wrap("hotkey");
         }
+        if settings_key {
+            self.settings_ui.open();
+        }
         if esc {
-            self.find.open = false;
+            // Esc closes the settings dialog first; only then the find bar
+            if self.settings_ui.open {
+                self.settings_ui.open = false;
+            } else {
+                self.find.open = false;
+            }
         }
         if let Some(p) = ctx.input(|i| i.raw.dropped_files.first().map(|f| f.path().to_path_buf()))
             && self.confirm_discard()
@@ -446,13 +454,9 @@ impl App {
                     let _ = settings::save(&self.settings);
                     spawn_self(&settings::path());
                 }
-                if ui.button("File associations…").clicked() {
+                if ui.button("Settings…    Ctrl+,").clicked() {
                     ui.close();
-                    self.assoc_sel = ASSOC_EXTS
-                        .iter()
-                        .map(|e| (e.to_string(), assoc::is_associated(e)))
-                        .collect();
-                    self.assoc_open = true;
+                    self.settings_ui.open();
                 }
                 ui.separator();
                 if ui.button("Quit").clicked() {
@@ -521,10 +525,10 @@ impl App {
             ui.toggle_value(&mut self.find.case, "Aa")
                 .on_hover_text("Match case");
             self.refresh_matches();
-            if ui.button("▲").clicked() {
+            if ui.button("Prev").clicked() {
                 self.step_match(false);
             }
-            if ui.button("▼").clicked() || enter {
+            if ui.button("Next").clicked() || enter {
                 self.step_match(true);
                 r.request_focus();
             }
@@ -553,57 +557,23 @@ impl App {
                     self.replace_everything();
                 }
             }
-            if ui.button("✕").clicked() {
+            if ui.button("Close").clicked() {
                 self.find.open = false;
             }
         });
     }
 
-    fn assoc_window(&mut self, ctx: &egui::Context) {
-        let mut open = self.assoc_open;
-        let mut apply = false;
-        egui::Window::new("File associations")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.label(
-                    "Register TurboText as an \"Open with\" handler (current user, no admin).",
-                );
-                for (ext, on) in self.assoc_sel.iter_mut() {
-                    ui.checkbox(on, ext.as_str());
-                }
-                if ui.button("Apply").clicked() {
-                    apply = true;
-                }
-            });
-        if apply {
-            let on: Vec<String> = self
-                .assoc_sel
-                .iter()
-                .filter(|(_, c)| *c)
-                .map(|(e, _)| e.clone())
-                .collect();
-            let off: Vec<String> = self
-                .assoc_sel
-                .iter()
-                .filter(|(_, c)| !*c)
-                .map(|(e, _)| e.clone())
-                .collect();
-            let result = assoc::associate(&on).and_then(|_| assoc::unassociate(&off));
-            self.banner = Some(match result {
-                Ok(()) => {
-                    "Associations updated. Confirm the default app in Windows Settings if asked."
-                        .into()
-                }
-                Err(e) => format!("Association failed: {e}"),
-            });
-            if !on.is_empty() {
-                assoc::open_default_apps();
+    fn apply_assoc(&mut self, req: AssocRequest) {
+        let result = assoc::associate(&req.on).and_then(|_| assoc::unassociate(&req.off));
+        self.banner = Some(match result {
+            Ok(()) => {
+                "Associations updated. Confirm the default app in Windows Settings if asked.".into()
             }
-            open = false;
+            Err(e) => format!("Association failed: {e}"),
+        });
+        if !req.on.is_empty() {
+            assoc::open_default_apps();
         }
-        self.assoc_open = open;
     }
 
     fn body(&mut self, ui: &mut egui::Ui) {
@@ -688,7 +658,11 @@ impl eframe::App for App {
                 "session_start",
                 json!({"startup_ms": self.tel.since_start_ms()}),
             );
-            // Debug builds only: lets screenshots of find/scroll run without synthetic keystrokes.
+            // Debug builds only: lets screenshots of find/scroll/settings run without synthetic keystrokes.
+            #[cfg(debug_assertions)]
+            if std::env::var("TT_DEBUG_SETTINGS").is_ok() {
+                self.settings_ui.open();
+            }
             #[cfg(debug_assertions)]
             if let Ok(needle) = std::env::var("TT_DEBUG_FIND") {
                 self.find.open = true;
@@ -706,7 +680,7 @@ impl eframe::App for App {
             egui::Panel::top("banner").show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(b).color(egui::Color32::from_rgb(220, 160, 40)));
-                    if ui.small_button("✕").clicked() {
+                    if ui.small_button("x").clicked() {
                         self.banner = None;
                     }
                 });
@@ -747,7 +721,9 @@ impl eframe::App for App {
             });
         });
         egui::CentralPanel::default().show(ui, |ui| self.body(ui));
-        self.assoc_window(&ctx);
+        if let Some(req) = self.settings_ui.show(&ctx, &mut self.settings) {
+            self.apply_assoc(req);
+        }
         self.refresh_matches();
     }
 
