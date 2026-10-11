@@ -38,6 +38,9 @@ pub struct Opts<'a> {
     pub font_size: f32,
     pub read_only: bool,
     pub highlight: bool,
+    pub font_proportional: bool,
+    /// 0 = Tab inserts a real tab; otherwise Tab inserts spaces up to the next tab stop.
+    pub tab_spaces: usize,
     pub marks: &'a [(usize, usize)],
     pub current: Option<usize>,
     /// Select this byte range and scroll it into view (once).
@@ -46,7 +49,11 @@ pub struct Opts<'a> {
 
 /// Returns true if the text was edited.
 pub fn show(ui: &mut Ui, text: &mut String, o: &Opts, cache: &mut HlCache) -> bool {
-    let font = FontId::monospace(o.font_size);
+    let font = if o.font_proportional {
+        FontId::proportional(o.font_size)
+    } else {
+        FontId::monospace(o.font_size)
+    };
     let dark = ui.visuals().dark_mode;
     let id = Id::new(EDITOR_ID);
     let avail = ui.available_size();
@@ -59,6 +66,22 @@ pub fn show(ui: &mut Ui, text: &mut String, o: &Opts, cache: &mut HlCache) -> bo
         0.0
     };
 
+    let mut changed = false;
+    if o.tab_spaces > 0
+        && !o.read_only
+        && ui.memory(|m| m.has_focus(id))
+        && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+    {
+        let mut state = TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
+        if let Some(r) = state.cursor.char_range() {
+            let at = indent_insert(text, (r.primary.index.0, r.secondary.index.0), o.tab_spaces);
+            state
+                .cursor
+                .set_char_range(Some(CCursorRange::one(CCursor::new(at))));
+            state.store(ui.ctx(), id);
+            changed = true;
+        }
+    }
     let mut scroll_to_char = None;
     if let Some((a, b)) = o.select.filter(|(a, b)| {
         a <= b && *b <= text.len() && text.is_char_boundary(*a) && text.is_char_boundary(*b)
@@ -72,7 +95,6 @@ pub fn show(ui: &mut Ui, text: &mut String, o: &Opts, cache: &mut HlCache) -> bo
         scroll_to_char = Some(ca);
     }
 
-    let mut changed = false;
     let area = if o.wrap {
         ScrollArea::vertical()
     } else {
@@ -108,7 +130,7 @@ pub fn show(ui: &mut Ui, text: &mut String, o: &Opts, cache: &mut HlCache) -> bo
                 .desired_width((avail.x - gutter_w).max(50.0))
                 .min_size(Vec2::new(0.0, avail.y))
                 .show(ui);
-            changed = out.response.response.changed();
+            changed |= out.response.response.changed();
 
             if o.line_numbers {
                 paint_gutter(ui, &out.galley, out.galley_pos, gutter_w, &font);
@@ -125,6 +147,23 @@ pub fn show(ui: &mut Ui, text: &mut String, o: &Opts, cache: &mut HlCache) -> bo
         });
     });
     changed
+}
+
+/// Replaces the selection (char indices, any order, clamped) with a tab: spaces up to the next
+/// multiple of `spaces` columns (`spaces == 0` inserts a real tab). Returns the new cursor char index.
+pub fn indent_insert(text: &mut String, sel: (usize, usize), spaces: usize) -> usize {
+    let total = text.chars().count();
+    let (a, b) = (sel.0.min(sel.1).min(total), sel.0.max(sel.1).min(total));
+    let byte = |c: usize| text.char_indices().nth(c).map_or(text.len(), |(i, _)| i);
+    let (ba, bb) = (byte(a), byte(b));
+    let col = text[..ba].chars().rev().take_while(|&c| c != '\n').count();
+    let insert = if spaces == 0 {
+        "\t".to_string()
+    } else {
+        " ".repeat(spaces - col % spaces)
+    };
+    text.replace_range(ba..bb, &insert);
+    a + insert.chars().count()
 }
 
 fn paint_gutter(ui: &Ui, galley: &egui::Galley, origin: egui::Pos2, gutter_w: f32, font: &FontId) {
@@ -152,5 +191,44 @@ fn paint_gutter(ui: &Ui, galley: &egui::Galley, origin: egui::Pos2, gutter_w: f3
         if start {
             n += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::indent_insert;
+
+    fn run(text: &str, sel: (usize, usize), spaces: usize) -> (String, usize) {
+        let mut t = text.to_string();
+        let cur = indent_insert(&mut t, sel, spaces);
+        (t, cur)
+    }
+
+    #[test]
+    fn inserts_up_to_next_tab_stop() {
+        assert_eq!(run("", (0, 0), 4), ("    ".into(), 4));
+        assert_eq!(run("ab", (2, 2), 4), ("ab  ".into(), 4));
+        assert_eq!(run("abcd", (4, 4), 4), ("abcd    ".into(), 8));
+        assert_eq!(run("abc", (1, 1), 2), ("a bc".into(), 2));
+    }
+
+    #[test]
+    fn column_counts_chars_not_bytes_and_resets_after_newline() {
+        assert_eq!(run("\u{e9}\u{e9}", (2, 2), 4), ("\u{e9}\u{e9}  ".into(), 4));
+        assert_eq!(run("a\nbc", (4, 4), 4), ("a\nbc  ".into(), 6));
+        assert_eq!(run("a\n", (2, 2), 4), ("a\n    ".into(), 6));
+    }
+
+    #[test]
+    fn replaces_selection_and_accepts_reversed_or_oversized_ranges() {
+        assert_eq!(run("hello world", (0, 5), 4), ("     world".into(), 4));
+        assert_eq!(run("hello world", (5, 0), 4), ("     world".into(), 4));
+        assert_eq!(run("ab", (1, 99), 4), ("a   ".into(), 4));
+        assert_eq!(run("ab", (50, 50), 4), ("ab  ".into(), 4));
+    }
+
+    #[test]
+    fn zero_spaces_inserts_a_real_tab() {
+        assert_eq!(run("ab", (1, 1), 0), ("a\tb".into(), 2));
     }
 }

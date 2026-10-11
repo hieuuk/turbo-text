@@ -608,6 +608,8 @@ impl App {
             font_size: self.settings.font_size,
             read_only: self.lossy || self.view,
             highlight: (self.text.len() as u64) <= LARGE_FILE,
+            font_proportional: self.settings.editor_font == "proportional",
+            tab_spaces: self.settings.tab_spaces as usize,
             marks,
             current: self.find.cur,
             select: self.select.take(),
