@@ -17,7 +17,7 @@ Run `scripts\deploy-local.ps1` from the repo:
 1. `cargo test` must pass, else it aborts.
 2. `cargo build --release`.
 3. Keep the old exe as `.prev`, stop any running instance, copy the new exe.
-4. `turbo-text.exe --associate .env .json .md .toml .ini .yaml` (idempotent; sets "Open with" entries and a default only where none exists).
+4. First install (or with `-Associate`): `turbo-text.exe --associate .env .json .md .toml .ini .yaml` (idempotent). Later deploys skip it so the Windows Default apps page does not reopen.
 
 Rollback: copy `turbo-text.exe.prev` over `turbo-text.exe`.
 

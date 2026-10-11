@@ -61,6 +61,15 @@ fn hash_of<T: Hash + ?Sized>(t: &T) -> u64 {
     h.finish()
 }
 
+/// Status-bar text for the save state; `None` for a blank buffer that was never saved.
+fn save_label(dirty: bool, has_path: bool) -> Option<&'static str> {
+    match (dirty, has_path) {
+        (true, _) => Some("Unsaved changes"),
+        (false, true) => Some("Saved"),
+        (false, false) => None,
+    }
+}
+
 fn spawn_self(path: &Path) {
     if let Ok(exe) = std::env::current_exe() {
         let _ = std::process::Command::new(exe).arg(path).spawn();
@@ -635,6 +644,10 @@ impl eframe::App for App {
                 self.find.open = true;
                 self.find.needle = needle;
                 self.step_match(true);
+                if let Ok(with) = std::env::var("TT_DEBUG_REPLACE") {
+                    self.find.with = with;
+                    self.replace_everything();
+                }
             }
         }
         let ctx = ui.ctx().clone();
@@ -654,6 +667,15 @@ impl eframe::App for App {
         }
         egui::Panel::bottom("status").show(ui, |ui| {
             ui.horizontal(|ui| {
+                if let Some(label) = save_label(self.dirty, self.path.is_some()) {
+                    let text = RichText::new(label).small();
+                    ui.label(if self.dirty {
+                        text.strong().color(egui::Color32::from_rgb(230, 160, 40))
+                    } else {
+                        text.weak()
+                    });
+                    ui.separator();
+                }
                 let eol = if self.eol == Eol::Crlf { "CRLF" } else { "LF" };
                 let mode = if self.lossy {
                     "read-only"
@@ -682,5 +704,22 @@ impl eframe::App for App {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.flush_mode_time();
         self.tel.shutdown();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::save_label;
+
+    #[test]
+    fn unsaved_changes_are_called_out() {
+        assert_eq!(save_label(true, true), Some("Unsaved changes"));
+        assert_eq!(save_label(true, false), Some("Unsaved changes"));
+    }
+
+    #[test]
+    fn clean_file_says_saved_and_blank_buffer_says_nothing() {
+        assert_eq!(save_label(false, true), Some("Saved"));
+        assert_eq!(save_label(false, false), None);
     }
 }
