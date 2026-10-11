@@ -84,6 +84,11 @@ fn run_cli(args: &[String]) -> Option<i32> {
     }
 }
 
+/// The same artwork as the exe's embedded icon, for the window/taskbar (eframe would otherwise show its own).
+fn window_icon() -> Option<eframe::egui::IconData> {
+    eframe::icon_data::from_png_bytes(include_bytes!("../icon/icon-512.png")).ok()
+}
+
 fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(code) = run_cli(&args) {
@@ -98,10 +103,14 @@ fn main() -> eframe::Result {
     }));
 
     let path = args.first().map(PathBuf::from);
+    let mut viewport = eframe::egui::ViewportBuilder::default()
+        .with_inner_size([900.0, 650.0])
+        .with_drag_and_drop(true);
+    if let Some(icon) = window_icon() {
+        viewport = viewport.with_icon(icon);
+    }
     let options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default()
-            .with_inner_size([900.0, 650.0])
-            .with_drag_and_drop(true),
+        viewport,
         ..Default::default()
     };
     eframe::run_native(
@@ -109,4 +118,18 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| Ok(Box::new(app::App::new(cc, path)))),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn window_icon_decodes() {
+        let icon = super::window_icon().expect("embedded icon must decode");
+        assert_eq!((icon.width, icon.height), (512, 512));
+        assert_eq!(icon.rgba.len(), 512 * 512 * 4);
+        assert!(
+            icon.rgba.chunks(4).any(|px| px[3] > 0),
+            "icon must not be fully transparent"
+        );
+    }
 }
