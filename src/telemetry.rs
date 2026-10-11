@@ -86,10 +86,10 @@ pub fn init_in(dir: PathBuf, settings: &Settings) -> Telemetry {
 
 fn load_salt(dir: &Path) -> String {
     let p = dir.join("salt");
-    if let Ok(s) = std::fs::read_to_string(&p) {
-        if !s.trim().is_empty() {
-            return s.trim().to_owned();
-        }
+    if let Ok(s) = std::fs::read_to_string(&p)
+        && !s.trim().is_empty()
+    {
+        return s.trim().to_owned();
     }
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -106,10 +106,10 @@ impl Telemetry {
     }
 
     pub fn event(&self, name: &str, fields: Value) {
-        if let Ok(g) = self.tx.lock() {
-            if let Some(tx) = g.as_ref() {
-                let _ = tx.send(event_line(now_unix(), name, fields));
-            }
+        if let Ok(g) = self.tx.lock()
+            && let Some(tx) = g.as_ref()
+        {
+            let _ = tx.send(event_line(now_unix(), name, fields));
         }
     }
 
@@ -146,10 +146,10 @@ impl Telemetry {
         if let Ok(mut g) = self.tx.lock() {
             g.take();
         }
-        if let Ok(mut w) = self.writer.lock() {
-            if let Some(h) = w.take() {
-                let _ = h.join();
-            }
+        if let Ok(mut w) = self.writer.lock()
+            && let Some(h) = w.take()
+        {
+            let _ = h.join();
         }
     }
 }
@@ -317,10 +317,9 @@ pub fn stats(dir: &Path) -> String {
         }
     }
     let mut out = format!("sessions: {sessions}\n");
-    if startup_n > 0 {
-        out += &format!("avg startup: {} ms\n", startup_sum / startup_n);
-    } else {
-        out += "avg startup: n/a\n";
+    match startup_sum.checked_div(startup_n) {
+        Some(avg) => out += &format!("avg startup: {avg} ms\n"),
+        None => out += "avg startup: n/a\n",
     }
     out += "files opened:\n";
     for (k, n) in &opens {

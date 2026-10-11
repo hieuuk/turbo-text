@@ -111,14 +111,14 @@ pub fn show(ui: &mut Ui, text: &mut String, o: &Opts, cache: &mut HlCache) -> bo
             if o.line_numbers {
                 paint_gutter(ui, &out.galley, out.galley_pos, gutter_w, &font);
             }
-            if o.select.is_some() {
-                if let Some(cr) = out.cursor_range {
-                    let r = out
-                        .galley
-                        .pos_from_cursor(cr.primary)
-                        .translate(out.galley_pos.to_vec2());
-                    ui.scroll_to_rect(r, Some(Align::Center));
-                }
+            if o.select.is_some()
+                && let Some(cr) = out.cursor_range
+            {
+                let r = out
+                    .galley
+                    .pos_from_cursor(cr.primary)
+                    .translate(out.galley_pos.to_vec2());
+                ui.scroll_to_rect(r, Some(Align::Center));
             }
         });
     });

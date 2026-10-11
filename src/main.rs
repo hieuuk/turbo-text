@@ -17,17 +17,23 @@ use std::path::PathBuf;
 #[link(name = "kernel32")]
 unsafe extern "system" {
     fn AttachConsole(process_id: u32) -> i32;
+    fn GetStdHandle(which: u32) -> isize;
 }
 
-/// Prints to the parent console even in the GUI subsystem.
+/// Prints to stdout; in the GUI subsystem with no stdout (launched from a console without
+/// redirection) it attaches to the parent console first.
 fn console_print(s: &str) {
     use std::io::Write;
-    unsafe { AttachConsole(u32::MAX) };
-    match std::fs::OpenOptions::new().write(true).open("CONOUT$") {
-        Ok(mut f) => {
+    const STD_OUTPUT_HANDLE: u32 = -11i32 as u32;
+    let handle = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+    if handle == 0 || handle == -1 {
+        unsafe { AttachConsole(u32::MAX) };
+        if let Ok(mut f) = std::fs::OpenOptions::new().write(true).open("CONOUT$") {
             let _ = f.write_all(s.as_bytes());
         }
-        Err(_) => print!("{s}"),
+    } else {
+        print!("{s}");
+        let _ = std::io::stdout().flush();
     }
 }
 

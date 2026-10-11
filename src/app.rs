@@ -165,7 +165,9 @@ impl App {
 
     fn flush_mode_time(&mut self) {
         let secs = self.mode_since.elapsed().as_secs_f64();
-        self.tel.add_mode_time(self.fmt.name(), self.view, secs);
+        if self.path.is_some() {
+            self.tel.add_mode_time(self.fmt.name(), self.view, secs);
+        }
         self.mode_since = Instant::now();
     }
 
@@ -348,10 +350,9 @@ impl App {
             self.find.open = false;
         }
         if let Some(p) = ctx.input(|i| i.raw.dropped_files.first().map(|f| f.path().to_path_buf()))
+            && self.confirm_discard()
         {
-            if self.confirm_discard() {
-                self.load(&p, "drop");
-            }
+            self.load(&p, "drop");
         }
     }
 

@@ -101,10 +101,10 @@ pub fn unassociate_in(base: &str, exts: &[String]) -> Result<(), String> {
         if let Ok(with) = hkcu.open_subkey_with_flags(ext_key(base, x), flags) {
             let _ = with.delete_value(PROG_ID);
         }
-        if let Ok(ext) = hkcu.open_subkey_with_flags(format!("{base}\\{x}"), flags) {
-            if ext.get_value::<String, _>("").is_ok_and(|v| v == PROG_ID) {
-                let _ = ext.delete_value("");
-            }
+        if let Ok(ext) = hkcu.open_subkey_with_flags(format!("{base}\\{x}"), flags)
+            && ext.get_value::<String, _>("").is_ok_and(|v| v == PROG_ID)
+        {
+            let _ = ext.delete_value("");
         }
     }
     Ok(())
