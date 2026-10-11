@@ -59,6 +59,7 @@ pub fn show(ui: &mut Ui, text: &mut String, o: &Opts, cache: &mut HlCache) -> bo
         0.0
     };
 
+    let mut scroll_to_char = None;
     if let Some((a, b)) = o.select.filter(|(a, b)| {
         a <= b && *b <= text.len() && text.is_char_boundary(*a) && text.is_char_boundary(*b)
     }) {
@@ -68,6 +69,7 @@ pub fn show(ui: &mut Ui, text: &mut String, o: &Opts, cache: &mut HlCache) -> bo
             .cursor
             .set_char_range(Some(CCursorRange::two(CCursor::new(ca), CCursor::new(cb))));
         state.store(ui.ctx(), id);
+        scroll_to_char = Some(ca);
     }
 
     let mut changed = false;
@@ -111,12 +113,12 @@ pub fn show(ui: &mut Ui, text: &mut String, o: &Opts, cache: &mut HlCache) -> bo
             if o.line_numbers {
                 paint_gutter(ui, &out.galley, out.galley_pos, gutter_w, &font);
             }
-            if o.select.is_some()
-                && let Some(cr) = out.cursor_range
-            {
+            // Not `out.cursor_range`: egui only reports it while the TextEdit has focus, and
+            // after "find next" the focus is in the find box.
+            if let Some(c) = scroll_to_char {
                 let r = out
                     .galley
-                    .pos_from_cursor(cr.primary)
+                    .pos_from_cursor(CCursor::new(c))
                     .translate(out.galley_pos.to_vec2());
                 ui.scroll_to_rect(r, Some(Align::Center));
             }

@@ -629,6 +629,13 @@ impl eframe::App for App {
                 "session_start",
                 json!({"startup_ms": self.tel.since_start_ms()}),
             );
+            // Debug builds only: lets screenshots of find/scroll run without synthetic keystrokes.
+            #[cfg(debug_assertions)]
+            if let Ok(needle) = std::env::var("TT_DEBUG_FIND") {
+                self.find.open = true;
+                self.find.needle = needle;
+                self.step_match(true);
+            }
         }
         let ctx = ui.ctx().clone();
         egui::Panel::top("menu").show(ui, |ui| self.menu(ui));
