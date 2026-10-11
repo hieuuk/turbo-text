@@ -3,15 +3,19 @@
 //! extension's default value when it has none. Windows keeps the real default-app choice
 //! behind the user's confirmation, so `open_default_apps` opens that settings page.
 
-use winreg::enums::*;
 use winreg::RegKey;
+use winreg::enums::*;
 
 pub const PROG_ID: &str = "TurboText.File";
 const CLASSES: &str = "Software\\Classes";
 
 pub fn normalize_ext(s: &str) -> String {
     let t = s.trim().trim_start_matches('.').to_ascii_lowercase();
-    if t.is_empty() || !t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+    if t.is_empty()
+        || !t
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
         return String::new();
     }
     format!(".{t}")
@@ -39,7 +43,9 @@ pub fn is_associated(ext: &str) -> bool {
 }
 
 pub fn open_default_apps() {
-    let _ = std::process::Command::new("cmd").args(["/c", "start", "", "ms-settings:defaultapps"]).spawn();
+    let _ = std::process::Command::new("cmd")
+        .args(["/c", "start", "", "ms-settings:defaultapps"])
+        .spawn();
 }
 
 fn valid(ext: &str) -> Result<(), String> {
@@ -64,9 +70,15 @@ pub fn associate_in(base: &str, exts: &[String], exe: &str) -> Result<(), String
     prog.set_value("", &"TurboText File").map_err(e)?;
     let (cmd, _) = prog.create_subkey("shell\\open\\command").map_err(e)?;
     cmd.set_value("", &command).map_err(e)?;
-    let exe_name = std::path::Path::new(exe).file_name().map(|n| n.to_string_lossy().into_owned());
+    let exe_name = std::path::Path::new(exe)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned());
     if let Some(name) = exe_name {
-        let (app, _) = hkcu.create_subkey(format!("{base}\\Applications\\{name}\\shell\\open\\command")).map_err(e)?;
+        let (app, _) = hkcu
+            .create_subkey(format!(
+                "{base}\\Applications\\{name}\\shell\\open\\command"
+            ))
+            .map_err(e)?;
         app.set_value("", &command).map_err(e)?;
     }
     for x in exts {
@@ -121,8 +133,14 @@ mod tests {
 
     #[test]
     fn key_builders() {
-        assert_eq!(ext_key("Software\\Classes", ".md"), "Software\\Classes\\.md\\OpenWithProgids");
-        assert_eq!(prog_key("Software\\Classes"), "Software\\Classes\\TurboText.File");
+        assert_eq!(
+            ext_key("Software\\Classes", ".md"),
+            "Software\\Classes\\.md\\OpenWithProgids"
+        );
+        assert_eq!(
+            prog_key("Software\\Classes"),
+            "Software\\Classes\\TurboText.File"
+        );
     }
 
     /// Real registry round trip, isolated under a throwaway HKCU key and cleaned up after.
@@ -135,7 +153,9 @@ mod tests {
         assert!(is_associated_in(&base, ".ttassoc") && is_associated_in(&base, ".ttassoc2"));
 
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-        let cmd = hkcu.open_subkey(format!("{}\\shell\\open\\command", prog_key(&base))).unwrap();
+        let cmd = hkcu
+            .open_subkey(format!("{}\\shell\\open\\command", prog_key(&base)))
+            .unwrap();
         let v: String = cmd.get_value("").unwrap();
         assert_eq!(v, "\"C:\\Apps\\turbo-text.exe\" \"%1\"");
 
@@ -143,18 +163,35 @@ mod tests {
         let other = hkcu.create_subkey(format!("{base}\\.ttassoc2")).unwrap().0;
         other.set_value("", &"Other.Handler").unwrap();
         associate_in(&base, &exts, "C:\\Apps\\turbo-text.exe").unwrap();
-        let d: String = hkcu.open_subkey(format!("{base}\\.ttassoc2")).unwrap().get_value("").unwrap();
+        let d: String = hkcu
+            .open_subkey(format!("{base}\\.ttassoc2"))
+            .unwrap()
+            .get_value("")
+            .unwrap();
         assert_eq!(d, "Other.Handler");
-        let d: String = hkcu.open_subkey(format!("{base}\\.ttassoc")).unwrap().get_value("").unwrap();
+        let d: String = hkcu
+            .open_subkey(format!("{base}\\.ttassoc"))
+            .unwrap()
+            .get_value("")
+            .unwrap();
         assert_eq!(d, PROG_ID);
 
         unassociate_in(&base, &exts).unwrap();
         assert!(!is_associated_in(&base, ".ttassoc") && !is_associated_in(&base, ".ttassoc2"));
-        let d: String = hkcu.open_subkey(format!("{base}\\.ttassoc2")).unwrap().get_value("").unwrap();
+        let d: String = hkcu
+            .open_subkey(format!("{base}\\.ttassoc2"))
+            .unwrap()
+            .get_value("")
+            .unwrap();
         assert_eq!(d, "Other.Handler");
-        assert!(hkcu.open_subkey(format!("{base}\\.ttassoc")).map(|k| k.get_value::<String, _>("").is_err()).unwrap_or(true));
+        assert!(
+            hkcu.open_subkey(format!("{base}\\.ttassoc"))
+                .map(|k| k.get_value::<String, _>("").is_err())
+                .unwrap_or(true)
+        );
 
-        let root = base.split('\\').next().unwrap().to_string() + "\\" + base.split('\\').nth(1).unwrap();
+        let root =
+            base.split('\\').next().unwrap().to_string() + "\\" + base.split('\\').nth(1).unwrap();
         let _ = hkcu.delete_subkey_all(root);
     }
 

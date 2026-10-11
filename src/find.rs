@@ -3,7 +3,11 @@ pub fn find_all(hay: &str, needle: &str, case: bool) -> Vec<(usize, usize)> {
     if needle.is_empty() {
         return Vec::new();
     }
-    let (h, n) = if case { (hay.to_owned(), needle.to_owned()) } else { (fold(hay), fold(needle)) };
+    let (h, n) = if case {
+        (hay.to_owned(), needle.to_owned())
+    } else {
+        (fold(hay), fold(needle))
+    };
     let mut out = Vec::new();
     let mut pos = 0;
     while let Some(i) = h[pos..].find(&n) {
@@ -85,9 +89,15 @@ mod tests {
 
     #[test]
     fn replace_all_counts_and_terminates() {
-        assert_eq!(replace_all("a-a-a", "a", "aa", true), ("aa-aa-aa".to_string(), 3));
+        assert_eq!(
+            replace_all("a-a-a", "a", "aa", true),
+            ("aa-aa-aa".to_string(), 3)
+        );
         assert_eq!(replace_all("abc", "", "x", true), ("abc".to_string(), 0));
-        assert_eq!(replace_all("Foo foo", "foo", "bar", false), ("bar bar".to_string(), 2));
+        assert_eq!(
+            replace_all("Foo foo", "foo", "bar", false),
+            ("bar bar".to_string(), 2)
+        );
     }
 
     #[test]

@@ -70,7 +70,16 @@ mod tests {
 
     #[test]
     fn config_variants() {
-        for f in ["a.ini", "a.toml", "a.yaml", "a.yml", "a.conf", "a.cfg", "a.config", "a.properties"] {
+        for f in [
+            "a.ini",
+            "a.toml",
+            "a.yaml",
+            "a.yml",
+            "a.conf",
+            "a.cfg",
+            "a.config",
+            "a.properties",
+        ] {
             assert_eq!(d(f), Format::Config, "{f}");
         }
     }

@@ -2,11 +2,11 @@
 //! Never records file contents, keystrokes, or full paths. All I/O errors are swallowed.
 
 use crate::settings::Settings;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::Sender;
 use std::sync::Mutex;
+use std::sync::mpsc::Sender;
 use std::thread::JoinHandle;
 use std::time::Instant;
 
@@ -34,8 +34,16 @@ pub fn init(settings: &Settings) -> Telemetry {
 
 const LOG: &str = "usage.jsonl";
 const LOG_OLD: &str = "usage.1.jsonl";
-const FEATURES: [&str; 8] =
-    ["toggle_mode", "toggle_wrap", "find_open", "replace_all", "save", "save_fail", "problem", "hotkey"];
+const FEATURES: [&str; 8] = [
+    "toggle_mode",
+    "toggle_wrap",
+    "find_open",
+    "replace_all",
+    "save",
+    "save_fail",
+    "problem",
+    "hotkey",
+];
 
 pub fn init_in(dir: PathBuf, settings: &Settings) -> Telemetry {
     let mut t = Telemetry {
@@ -48,13 +56,22 @@ pub fn init_in(dir: PathBuf, settings: &Settings) -> Telemetry {
     if !settings.telemetry || std::fs::create_dir_all(&dir).is_err() {
         return t;
     }
-    rotate(&dir, settings.telemetry_max_kb, settings.telemetry_max_days, now_unix());
+    rotate(
+        &dir,
+        settings.telemetry_max_kb,
+        settings.telemetry_max_days,
+        now_unix(),
+    );
     t.salt = load_salt(&dir);
     let (tx, rx) = std::sync::mpsc::channel::<String>();
     let path = dir.join(LOG);
     let handle = std::thread::spawn(move || {
         use std::io::Write;
-        let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path).ok();
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .ok();
         for line in rx {
             if let Some(f) = file.as_mut() {
                 let _ = writeln!(f, "{line}");
@@ -137,6 +154,34 @@ impl Telemetry {
     }
 }
 
+/// Synchronous append used from the panic hook, where the writer thread may already be gone.
+pub fn log_panic(dir: &Path, msg: &str, enabled: bool) {
+    if !enabled {
+        return;
+    }
+    use std::io::Write;
+    let line = event_line(now_unix(), "problem", json!({"kind": "panic", "msg": msg}));
+    let _ = std::fs::create_dir_all(dir);
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join(LOG))
+    {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
+pub fn size_bucket(bytes: u64) -> &'static str {
+    match bytes {
+        0..=1023 => "<1k",
+        1024..=10_239 => "<10k",
+        10_240..=102_399 => "<100k",
+        102_400..=1_048_575 => "<1m",
+        1_048_576..=5_242_879 => "<5m",
+        _ => ">=5m",
+    }
+}
+
 pub fn trunc_str(s: &str, max: usize) -> String {
     let mut end = max.min(s.len());
     while !s.is_char_boundary(end) {
@@ -188,7 +233,11 @@ pub fn path_token(path: &Path, salt: &str) -> String {
         .take(8)
         .collect::<String>()
         .to_ascii_lowercase();
-    let ext = if ext.is_empty() { "none".to_owned() } else { ext };
+    let ext = if ext.is_empty() {
+        "none".to_owned()
+    } else {
+        ext
+    };
     let mut h = std::collections::hash_map::DefaultHasher::new();
     salt.hash(&mut h);
     path.to_string_lossy().hash(&mut h);
@@ -201,11 +250,15 @@ fn event_time(line: &str) -> Option<u64> {
 
 pub fn rotate(dir: &Path, max_kb: u64, max_days: u32, now: u64) {
     let log = dir.join(LOG);
-    let Ok(meta) = std::fs::metadata(&log) else { return };
+    let Ok(meta) = std::fs::metadata(&log) else {
+        return;
+    };
     if meta.len() <= max_kb * 1024 {
         return;
     }
-    let Ok(bytes) = std::fs::read(&log) else { return };
+    let Ok(bytes) = std::fs::read(&log) else {
+        return;
+    };
     let cutoff = now.saturating_sub(max_days as u64 * 86_400);
     let kept: String = String::from_utf8_lossy(&bytes)
         .lines()
@@ -223,10 +276,16 @@ pub fn stats(dir: &Path) -> String {
     let mut features: BTreeMap<String, u64> = BTreeMap::new();
     let mut modes: BTreeMap<String, (f64, f64)> = BTreeMap::new();
     for name in [LOG_OLD, LOG] {
-        let Ok(bytes) = std::fs::read(dir.join(name)) else { continue };
+        let Ok(bytes) = std::fs::read(dir.join(name)) else {
+            continue;
+        };
         for line in String::from_utf8_lossy(&bytes).lines() {
-            let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-            let Some(e) = v.get("e").and_then(Value::as_str) else { continue };
+            let Ok(v) = serde_json::from_str::<Value>(line) else {
+                continue;
+            };
+            let Some(e) = v.get("e").and_then(Value::as_str) else {
+                continue;
+            };
             match e {
                 "session_start" => {
                     sessions += 1;
@@ -296,6 +355,31 @@ mod tests {
     }
 
     #[test]
+    fn panic_is_logged_truncated_when_enabled_only() {
+        let d = tmp("panic");
+        log_panic(&d, &"x".repeat(1000), true);
+        let body = fs::read_to_string(d.join("usage.jsonl")).unwrap();
+        let v: Value = serde_json::from_str(body.trim()).unwrap();
+        assert_eq!(v["e"], "problem");
+        assert_eq!(v["kind"], "panic");
+        assert!(body.len() <= MAX_LINE + 1);
+        let d2 = tmp("panic-off");
+        log_panic(&d2, "boom", false);
+        assert!(!d2.join("usage.jsonl").exists());
+    }
+
+    #[test]
+    fn size_buckets() {
+        assert_eq!(size_bucket(0), "<1k");
+        assert_eq!(size_bucket(1023), "<1k");
+        assert_eq!(size_bucket(1024), "<10k");
+        assert_eq!(size_bucket(50_000), "<100k");
+        assert_eq!(size_bucket(500_000), "<1m");
+        assert_eq!(size_bucket(3_000_000), "<5m");
+        assert_eq!(size_bucket(9_000_000), ">=5m");
+    }
+
+    #[test]
     fn trunc_is_boundary_safe() {
         assert_eq!(trunc_str("abc", 10), "abc");
         assert_eq!(trunc_str("\u{e9}\u{e9}\u{e9}", 3), "\u{e9}");
@@ -324,7 +408,10 @@ mod tests {
         assert!(a.starts_with("env:"));
         assert_eq!(a, path_token(p, "s1"));
         assert_ne!(a, path_token(p, "s2"));
-        assert!(path_token(Path::new("noext"), "s").starts_with(":") || path_token(Path::new("noext"), "s").starts_with("none:"));
+        assert!(
+            path_token(Path::new("noext"), "s").starts_with(":")
+                || path_token(Path::new("noext"), "s").starts_with("none:")
+        );
     }
 
     #[test]
@@ -332,7 +419,11 @@ mod tests {
         let d = tmp("rot");
         let now = 10_000_000;
         fs::write(d.join("usage.1.jsonl"), "{\"t\":1,\"e\":\"older\"}\n").unwrap();
-        let line = format!("{{\"t\":{},\"e\":\"x\",\"pad\":\"{}\"}}\n", now, "p".repeat(200));
+        let line = format!(
+            "{{\"t\":{},\"e\":\"x\",\"pad\":\"{}\"}}\n",
+            now,
+            "p".repeat(200)
+        );
         fs::write(d.join("usage.jsonl"), line.repeat(20)).unwrap();
         rotate(&d, 1, 90, now);
         assert!(!d.join("usage.jsonl").exists());
@@ -355,7 +446,11 @@ mod tests {
         let d = tmp("rot-age");
         let now = 100 * 86_400;
         let old = format!("{{\"t\":{},\"e\":\"old\"}}\n", now - 91 * 86_400);
-        let new = format!("{{\"t\":{},\"e\":\"new\",\"pad\":\"{}\"}}\n", now - 86_400, "p".repeat(2000));
+        let new = format!(
+            "{{\"t\":{},\"e\":\"new\",\"pad\":\"{}\"}}\n",
+            now - 86_400,
+            "p".repeat(2000)
+        );
         let body = format!("{}{}{}{{\"t\":", old, new, "garbage\n");
         fs::write(d.join("usage.jsonl"), body).unwrap();
         rotate(&d, 1, 90, now);
@@ -419,7 +514,10 @@ mod tests {
     #[test]
     fn disabled_writes_nothing() {
         let d = tmp("off");
-        let s = Settings { telemetry: false, ..Default::default() };
+        let s = Settings {
+            telemetry: false,
+            ..Default::default()
+        };
         let t = init_in(d.clone(), &s);
         t.event("save", json!({}));
         t.shutdown();

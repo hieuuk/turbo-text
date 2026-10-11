@@ -1,5 +1,5 @@
 use crate::format::Format;
-use eframe::egui::{text::LayoutJob, Color32, FontId, TextFormat};
+use eframe::egui::{Color32, FontId, TextFormat, text::LayoutJob};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -62,18 +62,27 @@ fn json(text: &str, out: &mut Vec<Span>) {
                 while j < b.len() && b[j] != b'"' && b[j] != b'\n' {
                     j += if b[j] == b'\\' { 2 } else { 1 };
                 }
-                let end = if j < b.len() && b[j] == b'"' { j + 1 } else { j.min(b.len()) };
+                let end = if j < b.len() && b[j] == b'"' {
+                    j + 1
+                } else {
+                    j.min(b.len())
+                };
                 let mut k = end;
                 while k < b.len() && (b[k] == b' ' || b[k] == b'\t') {
                     k += 1;
                 }
-                let kind = if k < b.len() && b[k] == b':' { Kind::Key } else { Kind::String };
+                let kind = if k < b.len() && b[k] == b':' {
+                    Kind::Key
+                } else {
+                    Kind::String
+                };
                 push(out, i, end, kind);
                 i = end.max(i + 1);
             }
             b'-' | b'0'..=b'9' => {
                 let mut j = i + 1;
-                while j < b.len() && matches!(b[j], b'0'..=b'9' | b'.' | b'e' | b'E' | b'+' | b'-') {
+                while j < b.len() && matches!(b[j], b'0'..=b'9' | b'.' | b'e' | b'E' | b'+' | b'-')
+                {
                     j += 1;
                 }
                 push(out, i, j, Kind::Number);
@@ -117,7 +126,9 @@ fn key_value(text: &str, config: bool, out: &mut Vec<Span>) {
             p += line[p..].len() - line[p..].trim_start().len();
         }
         let sep = line[p..].find(|c| c == '=' || (config && c == ':'));
-        let Some(sep) = sep.map(|s| s + p) else { continue };
+        let Some(sep) = sep.map(|s| s + p) else {
+            continue;
+        };
         let key_end = p + line[p..sep].trim_end().len();
         push(out, off + p, off + key_end, Kind::Key);
         let mut v = sep + 1;
@@ -128,7 +139,9 @@ fn key_value(text: &str, config: bool, out: &mut Vec<Span>) {
 
 fn value(line: &str, off: usize, v: usize, out: &mut Vec<Span>) {
     let rest = &line[v..];
-    let Some(first) = rest.chars().next() else { return };
+    let Some(first) = rest.chars().next() else {
+        return;
+    };
     let tail_from = if first == '"' || first == '\'' {
         let b = rest.as_bytes();
         let mut j = 1;
@@ -213,7 +226,9 @@ fn inline(line: &str, off: usize, start: usize, out: &mut Vec<Span>) {
             b'[' => line[i + 1..].find(']').and_then(|j| {
                 let close = i + 1 + j;
                 if b.get(close + 1) == Some(&b'(') {
-                    line[close + 2..].find(')').map(|k| (close + 2 + k + 1, Kind::Link))
+                    line[close + 2..]
+                        .find(')')
+                        .map(|k| (close + 2 + k + 1, Kind::Link))
                 } else {
                     None
                 }
@@ -241,7 +256,11 @@ pub fn layout_job(
     dark: bool,
 ) -> LayoutJob {
     let mut job = LayoutJob::default();
-    let plain = if dark { Color32::from_gray(210) } else { Color32::from_gray(40) };
+    let plain = if dark {
+        Color32::from_gray(210)
+    } else {
+        Color32::from_gray(40)
+    };
     let mut cuts = vec![0, text.len()];
     cuts.extend(spans.iter().flat_map(|s| [s.start, s.end]));
     cuts.extend(marks.iter().flat_map(|m| [m.0, m.1]));
@@ -257,14 +276,26 @@ pub fn layout_job(
         while mi < marks.len() && marks[mi].1 <= a {
             mi += 1;
         }
-        let fg = spans.get(si).filter(|s| s.start <= a && b <= s.end).map_or(plain, |s| color(s.kind, dark));
+        let fg = spans
+            .get(si)
+            .filter(|s| s.start <= a && b <= s.end)
+            .map_or(plain, |s| color(s.kind, dark));
         let bg = match marks.get(mi) {
             Some(m) if m.0 <= a && b <= m.1 => {
-                if current == Some(mi) { Color32::from_rgb(230, 140, 40) } else { Color32::from_rgba_unmultiplied(230, 200, 40, 110) }
+                if current == Some(mi) {
+                    Color32::from_rgb(230, 140, 40)
+                } else {
+                    Color32::from_rgba_unmultiplied(230, 200, 40, 110)
+                }
             }
             _ => Color32::TRANSPARENT,
         };
-        let fmt = TextFormat { font_id: font.clone(), color: fg, background: bg, ..Default::default() };
+        let fmt = TextFormat {
+            font_id: font.clone(),
+            color: fg,
+            background: bg,
+            ..Default::default()
+        };
         job.append(&text[a..b], 0.0, fmt);
     }
     job
@@ -293,7 +324,10 @@ mod tests {
     use super::*;
 
     fn toks(fmt: Format, text: &str) -> Vec<(Kind, &str)> {
-        tokenize(fmt, text).iter().map(|s| (s.kind, &text[s.start..s.end])).collect()
+        tokenize(fmt, text)
+            .iter()
+            .map(|s| (s.kind, &text[s.start..s.end]))
+            .collect()
     }
 
     fn assert_valid(fmt: Format, text: &str) {
@@ -326,7 +360,10 @@ mod tests {
     #[test]
     fn json_escaped_quote_and_numbers() {
         let t = toks(Format::Json, r#"["a\"b", -1.5e+3]"#);
-        assert_eq!(t, vec![(Kind::String, r#""a\"b""#), (Kind::Number, "-1.5e+3")]);
+        assert_eq!(
+            t,
+            vec![(Kind::String, r#""a\"b""#), (Kind::Number, "-1.5e+3")]
+        );
     }
 
     #[test]
@@ -357,7 +394,10 @@ mod tests {
     #[test]
     fn env_hash_inside_value_is_not_comment() {
         let t = toks(Format::Env, "URL=http://x/#frag\n");
-        assert_eq!(t, vec![(Kind::Key, "URL"), (Kind::String, "http://x/#frag")]);
+        assert_eq!(
+            t,
+            vec![(Kind::Key, "URL"), (Kind::String, "http://x/#frag")]
+        );
     }
 
     #[test]
@@ -413,11 +453,47 @@ mod tests {
     #[test]
     fn nasty_inputs_never_panic_and_stay_valid() {
         let inputs = [
-            "", "\n\n", "\"", "\"\\", "\"\\\u{e9}", "[", "[](", "[a](", "`", "**", "*", "* ", "export ",
-            "export", "=", "= =", "a=\"", "a='", "a=\"\\", "#", "```", "~~~\n", "1.", "1. ", "# ", "#######",
-            "\u{65e5}\u{672c}=\u{8a9e} # \u{e9}", "k: \"\u{e9}", "-", "-e", "tru", "\r\n", "a\r\n=b\r\n",
+            "",
+            "\n\n",
+            "\"",
+            "\"\\",
+            "\"\\\u{e9}",
+            "[",
+            "[](",
+            "[a](",
+            "`",
+            "**",
+            "*",
+            "* ",
+            "export ",
+            "export",
+            "=",
+            "= =",
+            "a=\"",
+            "a='",
+            "a=\"\\",
+            "#",
+            "```",
+            "~~~\n",
+            "1.",
+            "1. ",
+            "# ",
+            "#######",
+            "\u{65e5}\u{672c}=\u{8a9e} # \u{e9}",
+            "k: \"\u{e9}",
+            "-",
+            "-e",
+            "tru",
+            "\r\n",
+            "a\r\n=b\r\n",
         ];
-        for f in [Format::Json, Format::Env, Format::Config, Format::Markdown, Format::Plain] {
+        for f in [
+            Format::Json,
+            Format::Env,
+            Format::Config,
+            Format::Markdown,
+            Format::Plain,
+        ] {
             for t in inputs {
                 assert_valid(f, t);
             }
@@ -447,7 +523,14 @@ mod tests {
     fn layout_job_handles_marks_inside_spans() {
         let text = "{\"key\": 1}";
         let spans = tokenize(Format::Json, text);
-        let job = layout_job(text, &spans, &[(2, 4)], None, FontId::monospace(14.0), false);
+        let job = layout_job(
+            text,
+            &spans,
+            &[(2, 4)],
+            None,
+            FontId::monospace(14.0),
+            false,
+        );
         assert_eq!(job.text, text);
     }
 

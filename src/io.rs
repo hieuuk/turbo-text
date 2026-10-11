@@ -25,8 +25,17 @@ pub fn load(path: &Path) -> io::Result<Loaded> {
     let crlf = text.matches("\r\n").count();
     let lf = text.matches('\n').count() - crlf;
     let eol = if crlf > lf { Eol::Crlf } else { Eol::Lf };
-    let text = if crlf > 0 { text.replace("\r\n", "\n") } else { text };
-    Ok(Loaded { text, eol, lossy, size })
+    let text = if crlf > 0 {
+        text.replace("\r\n", "\n")
+    } else {
+        text
+    };
+    Ok(Loaded {
+        text,
+        eol,
+        lossy,
+        size,
+    })
 }
 
 /// Writes via a temp file in the same directory, then renames over the target.
@@ -35,7 +44,10 @@ pub fn save(path: &Path, text: &str, eol: Eol) -> io::Result<()> {
         Eol::Lf => text.to_owned(),
         Eol::Crlf => text.replace('\n', "\r\n"),
     };
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let tmp = path.with_file_name(format!(".{name}.tt-tmp"));
     let result = std::fs::write(&tmp, out).and_then(|_| std::fs::rename(&tmp, path));
     if result.is_err() {

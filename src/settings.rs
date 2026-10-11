@@ -44,7 +44,9 @@ pub fn path() -> PathBuf {
 }
 
 pub fn load() -> Settings {
-    std::fs::read_to_string(path()).map(|s| parse(&s)).unwrap_or_default()
+    std::fs::read_to_string(path())
+        .map(|s| parse(&s))
+        .unwrap_or_default()
 }
 
 pub fn save(s: &Settings) -> io::Result<()> {
@@ -83,7 +85,11 @@ mod tests {
 
     #[test]
     fn roundtrip() {
-        let s = Settings { wrap: true, theme: "dark".into(), ..Default::default() };
+        let s = Settings {
+            wrap: true,
+            theme: "dark".into(),
+            ..Default::default()
+        };
         let t = toml::to_string(&s).unwrap();
         assert_eq!(parse(&t), s);
     }
