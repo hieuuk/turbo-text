@@ -1,3 +1,8 @@
+#![allow(dead_code)]
+mod format;
+mod io;
+mod settings;
+
 fn main() {
-    println!("Hello, world!");
+    println!("turbo-text");
 }
