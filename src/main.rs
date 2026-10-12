@@ -11,6 +11,7 @@ mod io;
 mod settings;
 mod settings_ui;
 mod telemetry;
+mod theme;
 mod views;
 
 use std::path::PathBuf;

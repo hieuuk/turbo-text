@@ -24,7 +24,6 @@ pub const DEFAULT_ASSOC_EXTS: [&str; 17] = [
     ".xml",
 ];
 
-const THEMES: [&str; 3] = ["system", "light", "dark"];
 const FONTS: [&str; 2] = ["monospace", "proportional"];
 const MODES: [&str; 2] = ["view", "edit"];
 const TAB_SPACES: [u8; 4] = [0, 2, 4, 8];
@@ -35,6 +34,8 @@ const WINDOW_RANGE: std::ops::RangeInclusive<f32> = 300.0..=10000.0;
 pub struct Settings {
     // editor
     pub font_size: f32,
+    /// Row height as a multiple of the font's natural row height.
+    pub line_height: f32,
     pub wrap: bool,
     pub show_line_numbers: bool,
     pub tab_spaces: u8,
@@ -63,6 +64,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             font_size: 14.0,
+            line_height: 1.0,
             wrap: false,
             show_line_numbers: true,
             tab_spaces: 0,
@@ -108,6 +110,7 @@ impl Settings {
     pub fn reset_editor(&mut self) {
         let d = Settings::default();
         self.font_size = d.font_size;
+        self.line_height = d.line_height;
         self.wrap = d.wrap;
         self.show_line_numbers = d.show_line_numbers;
         self.tab_spaces = d.tab_spaces;
@@ -193,6 +196,7 @@ pub fn parse(s: &str) -> Settings {
     let window = |k: &str, def: f32| float(k).filter(|f| WINDOW_RANGE.contains(f)).unwrap_or(def);
     Settings {
         font_size: float("font_size").map_or(d.font_size, |f| f.clamp(6.0, 72.0)),
+        line_height: float("line_height").map_or(d.line_height, |f| f.clamp(0.8, 2.0)),
         wrap: flag("wrap", d.wrap),
         show_line_numbers: flag("show_line_numbers", d.show_line_numbers),
         tab_spaces: uint("tab_spaces")
@@ -202,7 +206,7 @@ pub fn parse(s: &str) -> Settings {
         highlight: flag("highlight", d.highlight),
         large_file_mb: uint("large_file_mb").map_or(d.large_file_mb, |n| n.clamp(1, 100)),
         editor_font: choice("editor_font", &FONTS, &d.editor_font),
-        theme: choice("theme", &THEMES, &d.theme),
+        theme: choice("theme", &crate::theme::IDS, &d.theme),
         ui_scale: float("ui_scale").map_or(d.ui_scale, |f| f.clamp(0.75, 2.0)),
         open_json: choice("open_json", &MODES, &d.open_json),
         open_markdown: choice("open_markdown", &MODES, &d.open_markdown),
@@ -308,6 +312,28 @@ mod tests {
         assert!(s.wrap);
         assert_eq!(s.theme, "system");
         assert_eq!(s.font_size, 14.0);
+    }
+
+    #[test]
+    fn line_height_defaults_and_clamps() {
+        assert_eq!(parse("").line_height, 1.0);
+        assert_eq!(parse("line_height = 1.5").line_height, 1.5);
+        assert_eq!(parse("line_height = 5.0").line_height, 2.0);
+        assert_eq!(parse("line_height = 0.1").line_height, 0.8);
+        for bad in ["\"tall\"", "nan", "inf"] {
+            assert_eq!(parse(&format!("line_height = {bad}")).line_height, 1.0, "{bad}");
+        }
+        let mut s = parse("line_height = 1.7");
+        s.reset_editor();
+        assert_eq!(s.line_height, 1.0);
+    }
+
+    #[test]
+    fn every_named_theme_is_a_valid_setting_and_junk_falls_back() {
+        for id in crate::theme::IDS {
+            assert_eq!(parse(&format!("theme = \"{id}\"")).theme, id);
+        }
+        assert_eq!(parse("theme = \"hotdog\"").theme, "system");
     }
 
     #[test]

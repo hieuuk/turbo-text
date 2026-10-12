@@ -1,4 +1,5 @@
 use crate::format::Format;
+use crate::theme::Palette;
 use eframe::egui::{Color32, FontId, TextFormat, text::LayoutJob};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -253,14 +254,11 @@ pub fn layout_job(
     marks: &[(usize, usize)],
     current: Option<usize>,
     font: FontId,
-    dark: bool,
+    pal: &Palette,
+    line_height: Option<f32>,
 ) -> LayoutJob {
     let mut job = LayoutJob::default();
-    let plain = if dark {
-        Color32::from_gray(210)
-    } else {
-        Color32::from_gray(40)
-    };
+    let plain = pal.fg;
     let mut cuts = vec![0, text.len()];
     cuts.extend(spans.iter().flat_map(|s| [s.start, s.end]));
     cuts.extend(marks.iter().flat_map(|m| [m.0, m.1]));
@@ -279,7 +277,7 @@ pub fn layout_job(
         let fg = spans
             .get(si)
             .filter(|s| s.start <= a && b <= s.end)
-            .map_or(plain, |s| color(s.kind, dark));
+            .map_or(plain, |s| pal.kind(s.kind));
         let bg = match marks.get(mi) {
             Some(m) if m.0 <= a && b <= m.1 => {
                 if current == Some(mi) {
@@ -294,6 +292,7 @@ pub fn layout_job(
             font_id: font.clone(),
             color: fg,
             background: bg,
+            line_height,
             ..Default::default()
         };
         job.append(&text[a..b], 0.0, fmt);
@@ -301,27 +300,10 @@ pub fn layout_job(
     job
 }
 
-fn color(kind: Kind, dark: bool) -> Color32 {
-    let (d, l) = match kind {
-        Kind::Key => ((156, 220, 254), (0, 70, 140)),
-        Kind::String => ((206, 145, 120), (163, 21, 21)),
-        Kind::Number => ((181, 206, 168), (9, 134, 88)),
-        Kind::Keyword => ((86, 156, 214), (0, 0, 255)),
-        Kind::Comment => ((106, 153, 85), (0, 128, 0)),
-        Kind::Heading => ((86, 156, 214), (0, 0, 160)),
-        Kind::Emph => ((220, 220, 170), (121, 94, 38)),
-        Kind::Code => ((206, 145, 120), (163, 21, 21)),
-        Kind::Link => ((78, 201, 176), (0, 112, 130)),
-        Kind::Marker => ((197, 134, 192), (175, 0, 219)),
-        Kind::Section => ((220, 220, 170), (121, 94, 38)),
-    };
-    let (r, g, b) = if dark { d } else { l };
-    Color32::from_rgb(r, g, b)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::resolve;
 
     fn toks(fmt: Format, text: &str) -> Vec<(Kind, &str)> {
         tokenize(fmt, text)
@@ -505,7 +487,15 @@ mod tests {
         let text = "ab cd ab";
         let spans = tokenize(Format::Plain, text);
         let marks = [(0, 2), (6, 8)];
-        let job = layout_job(text, &spans, &marks, Some(1), FontId::monospace(14.0), true);
+        let job = layout_job(
+            text,
+            &spans,
+            &marks,
+            Some(1),
+            FontId::monospace(14.0),
+            resolve("dark", true),
+            None,
+        );
         assert_eq!(job.text, text);
         let bg = |r: std::ops::Range<usize>| {
             job.sections
@@ -529,9 +519,34 @@ mod tests {
             &[(2, 4)],
             None,
             FontId::monospace(14.0),
-            false,
+            resolve("light", false),
+            None,
         );
         assert_eq!(job.text, text);
+    }
+
+    #[test]
+    fn layout_job_applies_line_height_to_every_section() {
+        let text = "k = 1 # c";
+        let spans = tokenize(Format::Config, text);
+        let pal = resolve("nord", true);
+        let font = FontId::monospace(14.0);
+        let tall = layout_job(text, &spans, &[(0, 1)], None, font.clone(), pal, Some(30.0));
+        assert!(tall.sections.len() > 2);
+        assert!(tall.sections.iter().all(|s| s.format.line_height == Some(30.0)));
+        let plain = layout_job(text, &spans, &[], None, font, pal, None);
+        assert!(plain.sections.iter().all(|s| s.format.line_height.is_none()));
+    }
+
+    #[test]
+    fn layout_job_uses_the_palette_colours() {
+        let text = "k = 1";
+        let spans = tokenize(Format::Config, text);
+        let font = FontId::monospace(14.0);
+        let nord = layout_job(text, &spans, &[], None, font.clone(), resolve("nord", true), None);
+        let dracula = layout_job(text, &spans, &[], None, font, resolve("dracula", true), None);
+        assert_eq!(nord.sections[0].format.color, resolve("nord", true).kind(Kind::Key));
+        assert_ne!(nord.sections[0].format.color, dracula.sections[0].format.color);
     }
 
     #[test]

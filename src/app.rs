@@ -5,7 +5,7 @@ use crate::io::{self, Eol};
 use crate::settings::{self, Settings};
 use crate::settings_ui::{AssocRequest, SettingsUi};
 use crate::telemetry::{self, Telemetry};
-use crate::{assoc, views};
+use crate::{assoc, theme, views};
 use eframe::egui::{self, Key, Modifiers, RichText, TextEdit};
 use egui_commonmark::CommonMarkCache;
 use serde_json::{Value, json};
@@ -72,11 +72,21 @@ fn save_due(since_last_change: Option<Duration>) -> bool {
 }
 
 fn apply_visuals(ctx: &egui::Context, s: &Settings) {
-    ctx.set_theme(match s.theme.as_str() {
-        "dark" => egui::ThemePreference::Dark,
-        "light" => egui::ThemePreference::Light,
-        _ => egui::ThemePreference::System,
-    });
+    // reset both slots so switching away from a named theme restores egui's own look
+    ctx.set_visuals_of(egui::Theme::Dark, egui::Visuals::dark());
+    ctx.set_visuals_of(egui::Theme::Light, egui::Visuals::light());
+    if s.theme == "system" {
+        ctx.set_theme(egui::ThemePreference::System);
+    } else {
+        let pal = theme::resolve(&s.theme, true);
+        let slot = if pal.dark {
+            egui::Theme::Dark
+        } else {
+            egui::Theme::Light
+        };
+        ctx.set_visuals_of(slot, pal.visuals());
+        ctx.set_theme(slot);
+    }
     ctx.set_zoom_factor(s.ui_scale);
 }
 
@@ -585,6 +595,7 @@ impl App {
     }
 
     fn body(&mut self, ui: &mut egui::Ui) {
+        let pal = theme::resolve(&self.settings.theme, ui.visuals().dark_mode);
         if self.view && self.fmt == Format::Markdown {
             views::markdown(ui, &mut self.md, &self.text);
             return;
@@ -606,7 +617,7 @@ impl App {
             }
             match &self.json {
                 Some((_, Ok(v))) => {
-                    views::json_tree(ui, v);
+                    views::json_tree(ui, v, pal);
                     return;
                 }
                 Some((_, Err((l, c, m)))) => {
@@ -635,6 +646,8 @@ impl App {
                 && (self.text.len() as u64) <= self.settings.large_file_mb * 1024 * 1024,
             font_proportional: self.settings.editor_font == "proportional",
             tab_spaces: self.settings.tab_spaces as usize,
+            pal,
+            line_height: self.settings.line_height,
             marks,
             current: self.find.cur,
             select: self.select.take(),

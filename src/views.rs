@@ -1,3 +1,5 @@
+use crate::highlight::Kind;
+use crate::theme::Palette;
 use eframe::egui::{self, Color32, RichText, ScrollArea, Ui};
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use serde_json::Value;
@@ -18,32 +20,24 @@ pub fn json_error(text: &str) -> Option<(usize, usize, String)> {
 /// Children shown per container before collapsing the rest into a "… n more" line.
 const MAX_CHILDREN: usize = 1000;
 
-pub fn json_tree(ui: &mut Ui, value: &Value) {
+pub fn json_tree(ui: &mut Ui, value: &Value, pal: &Palette) {
     ScrollArea::both()
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            node(ui, None, value, "root", 0);
+            node(ui, None, value, "root", 0, pal);
         });
 }
 
-fn leaf_color(v: &Value, dark: bool) -> Color32 {
-    match (v, dark) {
-        (Value::String(_), true) => Color32::from_rgb(206, 145, 120),
-        (Value::String(_), false) => Color32::from_rgb(163, 21, 21),
-        (Value::Number(_), true) => Color32::from_rgb(181, 206, 168),
-        (Value::Number(_), false) => Color32::from_rgb(9, 134, 88),
-        (_, true) => Color32::from_rgb(86, 156, 214),
-        (_, false) => Color32::from_rgb(0, 0, 255),
-    }
+fn leaf_color(v: &Value, pal: &Palette) -> Color32 {
+    pal.kind(match v {
+        Value::String(_) => Kind::String,
+        Value::Number(_) => Kind::Number,
+        _ => Kind::Keyword,
+    })
 }
 
-fn node(ui: &mut Ui, key: Option<&str>, v: &Value, path: &str, depth: usize) {
-    let dark = ui.visuals().dark_mode;
-    let key_color = if dark {
-        Color32::from_rgb(156, 220, 254)
-    } else {
-        Color32::from_rgb(0, 70, 140)
-    };
+fn node(ui: &mut Ui, key: Option<&str>, v: &Value, path: &str, depth: usize, pal: &Palette) {
+    let key_color = pal.kind(Kind::Key);
     let prefix = key.map(|k| format!("{k}: ")).unwrap_or_default();
     let children: Vec<(String, &Value)> = match v {
         Value::Object(m) => m
@@ -66,7 +60,7 @@ fn node(ui: &mut Ui, key: Option<&str>, v: &Value, path: &str, depth: usize) {
                     Value::String(s) => format!("\"{s}\""),
                     other => other.to_string(),
                 };
-                ui.label(RichText::new(shown).monospace().color(leaf_color(v, dark)));
+                ui.label(RichText::new(shown).monospace().color(leaf_color(v, pal)));
             });
             return;
         }
@@ -86,7 +80,7 @@ fn node(ui: &mut Ui, key: Option<&str>, v: &Value, path: &str, depth: usize) {
             for (k, child) in &children {
                 let is_arr = matches!(v, Value::Array(_));
                 let label = if is_arr { format!("[{k}]") } else { k.clone() };
-                node(ui, Some(&label), child, &format!("{path}/{k}"), depth + 1);
+                node(ui, Some(&label), child, &format!("{path}/{k}"), depth + 1, pal);
             }
             if total > children.len() {
                 ui.label(RichText::new(format!("… {} more", total - children.len())).italics());

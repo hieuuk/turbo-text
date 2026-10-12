@@ -2,6 +2,7 @@
 
 use crate::format::Format;
 use crate::highlight::{self, Span};
+use crate::theme::Palette;
 use eframe::egui::{
     self, Align, Align2, Color32, FontId, Id, ScrollArea, TextBuffer, TextEdit, Ui, Vec2,
     text::CCursor, text::CCursorRange,
@@ -41,6 +42,9 @@ pub struct Opts<'a> {
     pub font_proportional: bool,
     /// 0 = Tab inserts a real tab; otherwise Tab inserts spaces up to the next tab stop.
     pub tab_spaces: usize,
+    pub pal: &'static Palette,
+    /// Row height as a multiple of the font's natural row height (1.0 = natural).
+    pub line_height: f32,
     pub marks: &'a [(usize, usize)],
     pub current: Option<usize>,
     /// Select this byte range and scroll it into view (once).
@@ -54,7 +58,8 @@ pub fn show(ui: &mut Ui, text: &mut String, o: &Opts, cache: &mut HlCache) -> bo
     } else {
         FontId::monospace(o.font_size)
     };
-    let dark = ui.visuals().dark_mode;
+    let line_height = (o.line_height != 1.0)
+        .then(|| ui.fonts_mut(|f| f.row_height(&font)) * o.line_height);
     let id = Id::new(EDITOR_ID);
     let avail = ui.available_size();
     let lines = text.bytes().filter(|&b| b == b'\n').count() + 1;
@@ -113,7 +118,15 @@ pub fn show(ui: &mut Ui, text: &mut String, o: &Opts, cache: &mut HlCache) -> bo
                     &[]
                 };
                 let mut job =
-                    highlight::layout_job(t, spans, o.marks, o.current, font.clone(), dark);
+                    highlight::layout_job(
+                        t,
+                        spans,
+                        o.marks,
+                        o.current,
+                        font.clone(),
+                        o.pal,
+                        line_height,
+                    );
                 job.wrap.max_width = if o.wrap { wrap_width } else { f32::INFINITY };
                 job.keep_trailing_whitespace = true;
                 ui.fonts_mut(|f| f.layout_job(job))
@@ -133,7 +146,7 @@ pub fn show(ui: &mut Ui, text: &mut String, o: &Opts, cache: &mut HlCache) -> bo
             changed |= out.response.response.changed();
 
             if o.line_numbers {
-                paint_gutter(ui, &out.galley, out.galley_pos, gutter_w, &font);
+                paint_gutter(ui, &out.galley, out.galley_pos, &font, o.pal.gutter());
             }
             // Not `out.cursor_range`: egui only reports it while the TextEdit has focus, and
             // after "find next" the focus is in the find box.
@@ -172,15 +185,9 @@ pub fn indent_insert(text: &mut String, sel: (usize, usize), spaces: usize) -> u
     a + insert.chars().count()
 }
 
-fn paint_gutter(ui: &Ui, galley: &egui::Galley, origin: egui::Pos2, gutter_w: f32, font: &FontId) {
+fn paint_gutter(ui: &Ui, galley: &egui::Galley, origin: egui::Pos2, font: &FontId, color: Color32) {
     let clip = ui.clip_rect();
-    let color = if ui.visuals().dark_mode {
-        Color32::from_gray(110)
-    } else {
-        Color32::from_gray(150)
-    };
     let x = origin.x - 10.0;
-    let _ = gutter_w;
     let (mut n, mut start) = (1usize, true);
     for row in &galley.rows {
         let y = origin.y + row.pos.y;
