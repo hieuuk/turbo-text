@@ -140,7 +140,10 @@ impl Settings {
         self.reset_editor();
         self.reset_appearance();
         self.reset_behavior();
+        // keeps `assoc_exts`: it mirrors registry state, so wiping it would orphan registered types
+        let exts = std::mem::take(&mut self.assoc_exts);
         self.reset_files_privacy();
+        self.assoc_exts = exts;
     }
 
     pub fn reset_files_privacy(&mut self) {
@@ -332,8 +335,16 @@ telemetry = false
 assoc_exts = [\".x\"]
 ",
         );
+        let exts = s.assoc_exts.clone();
         s.reset_all();
-        assert_eq!(s, Settings::default());
+        // the extension list mirrors the registry, so wiping it would orphan registered types
+        assert_eq!(
+            s,
+            Settings {
+                assoc_exts: exts,
+                ..Settings::default()
+            }
+        );
     }
 
     #[test]

@@ -39,6 +39,8 @@ const GRID_SPACING: [f32; 2] = [28.0, 16.0];
 pub struct SettingsUi {
     pub open: bool,
     page: Page,
+    /// Sidebar/content size this frame: the nominal size, shrunk to fit small windows.
+    body: Vec2,
     /// Checkbox state per extension, kept in the same order as `Settings::assoc_exts`.
     assoc: Vec<(String, bool)>,
     custom: String,
@@ -108,6 +110,11 @@ impl SettingsUi {
         self.sync(&s.assoc_exts);
         let mut open = true;
         let mut request = None;
+        let room = ctx.content_rect().size() * 0.95;
+        self.body = Vec2::new(
+            CONTENT_W.min(room.x - SIDEBAR_W - 90.0).max(240.0),
+            BODY_H.min(room.y - 110.0).max(220.0),
+        );
         let frame = egui::Frame::window(&ctx.global_style()).inner_margin(20.0);
         egui::Window::new("Settings")
             .open(&mut open)
@@ -121,8 +128,8 @@ impl SettingsUi {
                     self.sidebar(ui, s);
                     ui.separator();
                     ui.vertical(|ui| {
-                        ui.set_width(CONTENT_W);
-                        ui.set_height(BODY_H);
+                        ui.set_width(self.body.x);
+                        ui.set_height(self.body.y);
                         ScrollArea::vertical()
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
@@ -138,7 +145,7 @@ impl SettingsUi {
 
     fn sidebar(&mut self, ui: &mut Ui, s: &mut Settings) {
         ui.allocate_ui_with_layout(
-            Vec2::new(SIDEBAR_W, BODY_H),
+            Vec2::new(SIDEBAR_W, self.body.y),
             Layout::top_down(Align::LEFT),
             |ui| {
                 ui.spacing_mut().item_spacing.y = 6.0;

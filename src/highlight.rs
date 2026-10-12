@@ -278,6 +278,13 @@ pub fn layout_job(
             .get(si)
             .filter(|s| s.start <= a && b <= s.end)
             .map_or(plain, |s| pal.kind(s.kind));
+        let on_current = current == Some(mi) && marks.get(mi).is_some_and(|m| m.0 <= a && b <= m.1);
+        // syntax colours are chosen for the theme background, not for the orange current match
+        let fg = if on_current {
+            Color32::from_gray(20)
+        } else {
+            fg
+        };
         let bg = match marks.get(mi) {
             Some(m) if m.0 <= a && b <= m.1 => {
                 if current == Some(mi) {
@@ -544,6 +551,31 @@ mod tests {
                 .sections
                 .iter()
                 .all(|s| s.format.line_height.is_none())
+        );
+    }
+
+    #[test]
+    fn current_match_text_is_dark_so_it_reads_on_the_orange_highlight() {
+        let text = "\"a\"=1";
+        let spans = vec![Span {
+            start: 0,
+            end: 3,
+            kind: Kind::String,
+        }];
+        let font = FontId::monospace(14.0);
+        let job = layout_job(
+            text,
+            &spans,
+            &[(0, 3)],
+            Some(0),
+            font,
+            resolve("dracula", true),
+            None,
+        );
+        let c = job.sections[0].format.color;
+        assert!(
+            u32::from(c.r()) + u32::from(c.g()) + u32::from(c.b()) < 200,
+            "{c:?}"
         );
     }
 

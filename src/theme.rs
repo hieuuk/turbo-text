@@ -28,7 +28,7 @@ impl Palette {
 
     /// Line numbers: the text colour faded towards the background.
     pub fn gutter(&self) -> Color32 {
-        self.fg.lerp_to_gamma(self.bg, 0.55)
+        self.fg.lerp_to_gamma(self.bg, 0.33)
     }
 
     /// egui visuals for this palette. The two stock themes keep egui's own look.
@@ -369,6 +369,14 @@ mod tests {
                 let c = contrast(p.kind(k), p.bg);
                 assert!(c >= 3.0, "{} {k:?} contrast {c:.2}", p.id);
             }
+        }
+    }
+
+    #[test]
+    fn line_numbers_stay_legible() {
+        for p in &PALETTES {
+            let c = contrast(p.gutter(), p.bg);
+            assert!(c >= 2.5, "{} gutter contrast {c:.2}", p.id);
         }
     }
 
