@@ -136,6 +136,13 @@ impl Settings {
         self.window_h = d.window_h;
     }
 
+    pub fn reset_all(&mut self) {
+        self.reset_editor();
+        self.reset_appearance();
+        self.reset_behavior();
+        self.reset_files_privacy();
+    }
+
     pub fn reset_files_privacy(&mut self) {
         let d = Settings::default();
         self.assoc_exts = d.assoc_exts;
@@ -315,13 +322,32 @@ mod tests {
     }
 
     #[test]
+    fn reset_all_restores_every_group_but_keeps_nothing_else() {
+        let mut s = parse(
+            "wrap = true
+theme = \"nord\"
+line_height = 1.6
+confirm_close = false
+telemetry = false
+assoc_exts = [\".x\"]
+",
+        );
+        s.reset_all();
+        assert_eq!(s, Settings::default());
+    }
+
+    #[test]
     fn line_height_defaults_and_clamps() {
         assert_eq!(parse("").line_height, 1.0);
         assert_eq!(parse("line_height = 1.5").line_height, 1.5);
         assert_eq!(parse("line_height = 5.0").line_height, 2.0);
         assert_eq!(parse("line_height = 0.1").line_height, 0.8);
         for bad in ["\"tall\"", "nan", "inf"] {
-            assert_eq!(parse(&format!("line_height = {bad}")).line_height, 1.0, "{bad}");
+            assert_eq!(
+                parse(&format!("line_height = {bad}")).line_height,
+                1.0,
+                "{bad}"
+            );
         }
         let mut s = parse("line_height = 1.7");
         s.reset_editor();

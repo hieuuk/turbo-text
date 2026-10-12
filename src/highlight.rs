@@ -533,9 +533,18 @@ mod tests {
         let font = FontId::monospace(14.0);
         let tall = layout_job(text, &spans, &[(0, 1)], None, font.clone(), pal, Some(30.0));
         assert!(tall.sections.len() > 2);
-        assert!(tall.sections.iter().all(|s| s.format.line_height == Some(30.0)));
+        assert!(
+            tall.sections
+                .iter()
+                .all(|s| s.format.line_height == Some(30.0))
+        );
         let plain = layout_job(text, &spans, &[], None, font, pal, None);
-        assert!(plain.sections.iter().all(|s| s.format.line_height.is_none()));
+        assert!(
+            plain
+                .sections
+                .iter()
+                .all(|s| s.format.line_height.is_none())
+        );
     }
 
     #[test]
@@ -543,10 +552,32 @@ mod tests {
         let text = "k = 1";
         let spans = tokenize(Format::Config, text);
         let font = FontId::monospace(14.0);
-        let nord = layout_job(text, &spans, &[], None, font.clone(), resolve("nord", true), None);
-        let dracula = layout_job(text, &spans, &[], None, font, resolve("dracula", true), None);
-        assert_eq!(nord.sections[0].format.color, resolve("nord", true).kind(Kind::Key));
-        assert_ne!(nord.sections[0].format.color, dracula.sections[0].format.color);
+        let nord = layout_job(
+            text,
+            &spans,
+            &[],
+            None,
+            font.clone(),
+            resolve("nord", true),
+            None,
+        );
+        let dracula = layout_job(
+            text,
+            &spans,
+            &[],
+            None,
+            font,
+            resolve("dracula", true),
+            None,
+        );
+        assert_eq!(
+            nord.sections[0].format.color,
+            resolve("nord", true).kind(Kind::Key)
+        );
+        assert_ne!(
+            nord.sections[0].format.color,
+            dracula.sections[0].format.color
+        );
     }
 
     #[test]

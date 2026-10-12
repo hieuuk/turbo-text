@@ -58,8 +58,8 @@ pub fn show(ui: &mut Ui, text: &mut String, o: &Opts, cache: &mut HlCache) -> bo
     } else {
         FontId::monospace(o.font_size)
     };
-    let line_height = (o.line_height != 1.0)
-        .then(|| ui.fonts_mut(|f| f.row_height(&font)) * o.line_height);
+    let line_height =
+        (o.line_height != 1.0).then(|| ui.fonts_mut(|f| f.row_height(&font)) * o.line_height);
     let id = Id::new(EDITOR_ID);
     let avail = ui.available_size();
     let lines = text.bytes().filter(|&b| b == b'\n').count() + 1;
@@ -117,16 +117,15 @@ pub fn show(ui: &mut Ui, text: &mut String, o: &Opts, cache: &mut HlCache) -> bo
                 } else {
                     &[]
                 };
-                let mut job =
-                    highlight::layout_job(
-                        t,
-                        spans,
-                        o.marks,
-                        o.current,
-                        font.clone(),
-                        o.pal,
-                        line_height,
-                    );
+                let mut job = highlight::layout_job(
+                    t,
+                    spans,
+                    o.marks,
+                    o.current,
+                    font.clone(),
+                    o.pal,
+                    line_height,
+                );
                 job.wrap.max_width = if o.wrap { wrap_width } else { f32::INFINITY };
                 job.keep_trailing_whitespace = true;
                 ui.fonts_mut(|f| f.layout_job(job))

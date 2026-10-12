@@ -80,7 +80,14 @@ fn node(ui: &mut Ui, key: Option<&str>, v: &Value, path: &str, depth: usize, pal
             for (k, child) in &children {
                 let is_arr = matches!(v, Value::Array(_));
                 let label = if is_arr { format!("[{k}]") } else { k.clone() };
-                node(ui, Some(&label), child, &format!("{path}/{k}"), depth + 1, pal);
+                node(
+                    ui,
+                    Some(&label),
+                    child,
+                    &format!("{path}/{k}"),
+                    depth + 1,
+                    pal,
+                );
             }
             if total > children.len() {
                 ui.label(RichText::new(format!("… {} more", total - children.len())).italics());

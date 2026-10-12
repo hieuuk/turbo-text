@@ -30,16 +30,17 @@ One file per window. Open another file with `Ctrl+O` or drag it onto the window.
 
 ## Settings
 
-Open **File > Settings…** (`Ctrl+,`). Changes apply instantly and are saved automatically; each group has "Reset this group to defaults". The file is `%APPDATA%\turbo-text\settings.toml` (File > Open settings file) and can also be edited by hand: every key is validated on its own, so an invalid or out-of-range value falls back to that key's default and never affects the others.
+Open **File > Settings…** (`Ctrl+,`). A sidebar switches between Editor, Appearance (colour themes), Behavior and Files and privacy. Changes apply instantly and are saved automatically; each page has "Reset this page to defaults" and the sidebar has "Reset all to defaults". The file is `%APPDATA%\turbo-text\settings.toml` (File > Open settings file) and can also be edited by hand: every key is validated on its own, so an invalid or out-of-range value falls back to that key's default and never affects the others.
 
 | Key | Values (default) | Applies |
 |---|---|---|
 | `font_size` | 6-72 (14) | live |
+| `line_height` | 0.8-2.0 (1.0): row height as a multiple of the font's natural row height | live |
 | `editor_font` | `monospace` / `proportional` | live |
 | `wrap`, `show_line_numbers`, `highlight` | bool (false, true, true) | live |
 | `tab_spaces` | 0 = tab character, 2, 4, 8 (0) | live |
 | `large_file_mb` | 1-100 (5): highlighting turns off above this size | live |
-| `theme` | `system` / `light` / `dark` | live |
+| `theme` | `system` (follow Windows), `dark`, `light`, `dracula`, `tokyo-night`, `catppuccin-mocha`, `nord`, `gruvbox-dark`, `solarized-dark`, `one-dark`, `monokai`, `solarized-light`, `catppuccin-latte` (system) | live |
 | `ui_scale` | 0.75-2.0 (1.0) | live |
 | `open_json`, `open_markdown`, `open_other` | `view` / `edit` (view, view, edit) | next file opened |
 | `confirm_close` | bool (true): ask before closing with unsaved changes | live |
