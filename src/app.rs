@@ -51,6 +51,8 @@ pub struct App {
     find: Find,
     mode_since: Instant,
     started_logged: bool,
+    /// ms from `main` until the window and GL context exist (`App::new` runs).
+    init_ms: u64,
     last_title: String,
     allow_close: bool,
     select: Option<(usize, usize)>,
@@ -138,6 +140,7 @@ impl App {
         apply_visuals(&cc.egui_ctx, &settings);
         let (families, fonts_custom) = apply_fonts(&cc.egui_ctx, &settings, false);
         let tel = telemetry::init(&settings);
+        let init_ms = tel.since_start_ms();
         let mut app = App {
             families,
             fonts_custom,
@@ -161,6 +164,7 @@ impl App {
             find: Find::default(),
             mode_since: Instant::now(),
             started_logged: false,
+            init_ms,
             last_title: String::new(),
             allow_close: false,
             select: None,
@@ -719,7 +723,7 @@ impl eframe::App for App {
             self.started_logged = true;
             self.tel.event(
                 "session_start",
-                json!({"startup_ms": self.tel.since_start_ms()}),
+                json!({"startup_ms": self.tel.since_start_ms(), "init_ms": self.init_ms}),
             );
             // Debug builds only: lets screenshots of find/scroll/settings run without synthetic keystrokes.
             #[cfg(debug_assertions)]

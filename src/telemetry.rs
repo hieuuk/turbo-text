@@ -49,7 +49,7 @@ pub fn init_in(dir: PathBuf, settings: &Settings) -> Telemetry {
     let mut t = Telemetry {
         tx: Mutex::new(None),
         writer: Mutex::new(None),
-        started: Instant::now(),
+        started: crate::START.get().copied().unwrap_or_else(Instant::now),
         salt: String::new(),
         mode_secs: Mutex::new(BTreeMap::new()),
     };

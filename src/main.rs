@@ -16,6 +16,11 @@ mod theme;
 mod views;
 
 use std::path::PathBuf;
+use std::sync::OnceLock;
+use std::time::Instant;
+
+/// Process start as seen by `main`; the usage log's `startup_ms` is measured from here to the first frame.
+pub static START: OnceLock<Instant> = OnceLock::new();
 
 #[link(name = "kernel32")]
 unsafe extern "system" {
@@ -93,6 +98,7 @@ fn window_icon() -> Option<eframe::egui::IconData> {
 }
 
 fn main() -> eframe::Result {
+    START.get_or_init(Instant::now);
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(code) = run_cli(&args) {
         std::process::exit(code);
