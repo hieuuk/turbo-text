@@ -35,8 +35,8 @@ Open **File > Settings…** (`Ctrl+,`). A sidebar switches between Editor, Appea
 | Key | Values (default) | Applies |
 |---|---|---|
 | `font_size` | 6-72 (14) | live |
-| `line_height` | 0.8-2.0 (1.0): row height as a multiple of the font's natural row height | live |
-| `editor_font` | `monospace` / `proportional` | live |
+| `line_height` | 0.8-2.0 (1.0): row height as a multiple of the font's natural row height, in the editor and the Markdown view | live |
+| `editor_font`, `view_font` | `monospace`, `proportional`, or a Windows font: `consolas`, `cascadia-code`, `cascadia-mono`, `courier-new`, `lucida-console`, `segoe-ui`, `arial`, `calibri`, `verdana`, `tahoma`, `georgia`, `times-new-roman` (monospace / proportional). The view font is the Markdown view's body text. Fonts are read from `C:\Windows\Fonts` only when selected | live |
 | `wrap`, `show_line_numbers`, `highlight` | bool (false, true, true) | live |
 | `tab_spaces` | 0 = tab character, 2, 4, 8 (0) | live |
 | `large_file_mb` | 1-100 (5): highlighting turns off above this size | live |

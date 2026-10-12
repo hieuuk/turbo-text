@@ -12,6 +12,10 @@ serde_json = { version = "1.0.154", features = ["preserve_order"] }
 toml = "1.1.8"
 winreg = "0.56.0"
 
+# Markdown view line height: one small patch in to_richtext (see vendor/egui_commonmark_backend/src/misc.rs)
+[patch.crates-io]
+egui_commonmark_backend = { path = "vendor/egui_commonmark_backend" }
+
 [profile.release]
 opt-level = "z"
 lto = true

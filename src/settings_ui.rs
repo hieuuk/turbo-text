@@ -1,8 +1,8 @@
 //! The settings dialog: an in-window egui `Window` with a section sidebar, drawn only while open.
 
-use crate::assoc;
 use crate::settings::Settings;
 use crate::theme::{self, PALETTES};
+use crate::{assoc, fonts};
 use eframe::egui::{
     self, Align, Align2, Button, ComboBox, DragValue, Layout, RichText, ScrollArea, Sense, Ui, Vec2,
 };
@@ -39,6 +39,8 @@ const GRID_SPACING: [f32; 2] = [28.0, 16.0];
 pub struct SettingsUi {
     pub open: bool,
     page: Page,
+    /// Ids of the fonts to offer: the two built-ins plus system fonts found on this PC.
+    font_ids: Vec<&'static str>,
     /// Sidebar/content size this frame: the nominal size, shrunk to fit small windows.
     body: Vec2,
     /// Checkbox state per extension, kept in the same order as `Settings::assoc_exts`.
@@ -84,6 +86,11 @@ impl SettingsUi {
                 _ => Page::Editor,
             };
         }
+        let found = fonts::available(&fonts::system_dir());
+        self.font_ids = ["monospace", "proportional"]
+            .into_iter()
+            .chain(found.iter().map(|f| f.id))
+            .collect();
         self.assoc.clear();
         self.custom_error = None;
     }
@@ -173,8 +180,8 @@ impl SettingsUi {
         ui.add_space(8.0);
         let mut request = None;
         match self.page {
-            Page::Editor => editor_page(ui, s),
-            Page::Appearance => appearance_page(ui, s),
+            Page::Editor => editor_page(ui, s, &self.font_ids),
+            Page::Appearance => appearance_page(ui, s, &self.font_ids),
             Page::Behavior => behavior_page(ui, s),
             Page::Files => request = self.files_page(ui, s),
         }
@@ -299,19 +306,14 @@ fn grid(id: &str) -> egui::Grid {
     egui::Grid::new(id).num_columns(2).spacing(GRID_SPACING)
 }
 
-fn editor_page(ui: &mut Ui, s: &mut Settings) {
+fn editor_page(ui: &mut Ui, s: &mut Settings, font_ids: &[&str]) {
     grid("editor_grid").show(ui, |ui| {
         ui.label("Font size");
         ui.add(egui::Slider::new(&mut s.font_size, 6.0..=72.0).step_by(1.0));
         ui.end_row();
 
-        ui.label("Font");
-        choice(
-            ui,
-            "editor_font",
-            &mut s.editor_font,
-            &[("monospace", "Monospace"), ("proportional", "Proportional")],
-        );
+        ui.label("Editor font");
+        font_choice(ui, "editor_font", &mut s.editor_font, font_ids);
         ui.end_row();
 
         ui.label("Line height");
@@ -360,7 +362,24 @@ fn editor_page(ui: &mut Ui, s: &mut Settings) {
     reset_button(ui, || s.reset_editor());
 }
 
-fn appearance_page(ui: &mut Ui, s: &mut Settings) {
+fn appearance_page(ui: &mut Ui, s: &mut Settings, font_ids: &[&str]) {
+    grid("appearance_grid").show(ui, |ui| {
+        ui.label("Markdown view font");
+        font_choice(ui, "view_font", &mut s.view_font, font_ids);
+        ui.end_row();
+
+        ui.label("Interface zoom");
+        let label = format!("{:.0}%", s.ui_scale * 100.0);
+        ComboBox::from_id_salt("ui_scale")
+            .selected_text(label)
+            .show_ui(ui, |ui| {
+                for v in SCALES {
+                    ui.selectable_value(&mut s.ui_scale, v, format!("{:.0}%", v * 100.0));
+                }
+            });
+        ui.end_row();
+    });
+    ui.add_space(4.0);
     let mut follow = s.theme == "system";
     if ui
         .checkbox(&mut follow, "Follow the system light / dark setting")
@@ -389,18 +408,6 @@ fn appearance_page(ui: &mut Ui, s: &mut Settings) {
             });
     });
     ui.add_space(6.0);
-    grid("appearance_grid").show(ui, |ui| {
-        ui.label("Interface zoom");
-        let label = format!("{:.0}%", s.ui_scale * 100.0);
-        ComboBox::from_id_salt("ui_scale")
-            .selected_text(label)
-            .show_ui(ui, |ui| {
-                for v in SCALES {
-                    ui.selectable_value(&mut s.ui_scale, v, format!("{:.0}%", v * 100.0));
-                }
-            });
-        ui.end_row();
-    });
     reset_button(ui, || s.reset_appearance());
 }
 
@@ -479,6 +486,23 @@ fn behavior_page(ui: &mut Ui, s: &mut Settings) {
         "Remember window size (applies next launch)",
     );
     reset_button(ui, || s.reset_behavior());
+}
+
+/// A combo box over the installed fonts; the current value is always listed, even if its file is gone.
+fn font_choice(ui: &mut Ui, id: &str, value: &mut String, ids: &[&str]) {
+    ComboBox::from_id_salt(id)
+        .selected_text(fonts::label(value))
+        .height(320.0)
+        .show_ui(ui, |ui| {
+            let current = value.clone();
+            for f in ids
+                .iter()
+                .copied()
+                .chain((!ids.contains(&current.as_str())).then_some(current.as_str()))
+            {
+                ui.selectable_value(value, f.to_string(), fonts::label(f));
+            }
+        });
 }
 
 /// A combo box over `(stored value, label)` pairs, storing the value string.

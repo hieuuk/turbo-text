@@ -5,8 +5,8 @@ use crate::io::{self, Eol};
 use crate::settings::{self, Settings};
 use crate::settings_ui::{AssocRequest, SettingsUi};
 use crate::telemetry::{self, Telemetry};
-use crate::{assoc, theme, views};
-use eframe::egui::{self, Key, Modifiers, RichText, TextEdit};
+use crate::{assoc, fonts, theme, views};
+use eframe::egui::{self, FontFamily, Key, Modifiers, RichText, TextEdit};
 use egui_commonmark::CommonMarkCache;
 use serde_json::{Value, json};
 use std::hash::{Hash, Hasher};
@@ -32,6 +32,9 @@ struct Find {
 }
 
 pub struct App {
+    /// Resolved (editor, Markdown view) font families, and whether system fonts are loaded.
+    families: (FontFamily, FontFamily),
+    fonts_custom: bool,
     path: Option<PathBuf>,
     text: String,
     eol: Eol,
@@ -69,6 +72,30 @@ fn hash_of<T: Hash + ?Sized>(t: &T) -> u64 {
 /// True once the settings have been unchanged for the debounce period.
 fn save_due(since_last_change: Option<Duration>) -> bool {
     since_last_change.is_some_and(|d| d >= SAVE_DEBOUNCE)
+}
+
+/// Loads the chosen system fonts (if any) into egui and returns the (editor, view) families.
+/// Reads font files only when one is selected, or once more to drop them again.
+fn apply_fonts(
+    ctx: &egui::Context,
+    s: &Settings,
+    was_custom: bool,
+) -> ((FontFamily, FontFamily), bool) {
+    let wanted = [s.editor_font.as_str(), s.view_font.as_str()];
+    let custom = wanted
+        .iter()
+        .any(|w| !matches!(*w, "monospace" | "proportional"));
+    let mut loaded = Vec::new();
+    if custom || was_custom {
+        let (defs, ids) = fonts::definitions(&fonts::system_dir(), &wanted);
+        ctx.set_fonts(defs);
+        loaded = ids;
+    }
+    let fam = (
+        fonts::family(wanted[0], &loaded),
+        fonts::family(wanted[1], &loaded),
+    );
+    (fam, custom)
 }
 
 fn apply_visuals(ctx: &egui::Context, s: &Settings) {
@@ -109,8 +136,11 @@ impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, path: Option<PathBuf>) -> Self {
         let settings = settings::load();
         apply_visuals(&cc.egui_ctx, &settings);
+        let (families, fonts_custom) = apply_fonts(&cc.egui_ctx, &settings, false);
         let tel = telemetry::init(&settings);
         let mut app = App {
+            families,
+            fonts_custom,
             path: None,
             text: String::new(),
             eol: Eol::Crlf,
@@ -423,6 +453,12 @@ impl App {
         }
         if self.settings != self.applied {
             apply_visuals(ctx, &self.settings);
+            if self.settings.editor_font != self.applied.editor_font
+                || self.settings.view_font != self.applied.view_font
+            {
+                (self.families, self.fonts_custom) =
+                    apply_fonts(ctx, &self.settings, self.fonts_custom);
+            }
             self.applied = self.settings.clone();
             self.settings_changed_at = Some(Instant::now());
         }
@@ -597,7 +633,13 @@ impl App {
     fn body(&mut self, ui: &mut egui::Ui) {
         let pal = theme::resolve(&self.settings.theme, ui.visuals().dark_mode);
         if self.view && self.fmt == Format::Markdown {
-            views::markdown(ui, &mut self.md, &self.text);
+            views::markdown(
+                ui,
+                &mut self.md,
+                &self.text,
+                &self.families.1,
+                self.settings.line_height,
+            );
             return;
         }
         if self.view && self.fmt == Format::Json {
@@ -644,7 +686,7 @@ impl App {
             read_only: self.lossy || self.view,
             highlight: self.settings.highlight
                 && (self.text.len() as u64) <= self.settings.large_file_mb * 1024 * 1024,
-            font_proportional: self.settings.editor_font == "proportional",
+            family: self.families.0.clone(),
             tab_spaces: self.settings.tab_spaces as usize,
             pal,
             line_height: self.settings.line_height,

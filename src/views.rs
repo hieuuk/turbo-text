@@ -95,10 +95,29 @@ fn node(ui: &mut Ui, key: Option<&str>, v: &Value, path: &str, depth: usize, pal
         });
 }
 
-pub fn markdown(ui: &mut Ui, cache: &mut CommonMarkCache, text: &str) {
+/// `line_height` is read by the patched `egui_commonmark_backend` (see `vendor/`) from egui's temp
+/// data; the body text styles use `family`, code blocks stay monospace.
+pub fn markdown(
+    ui: &mut Ui,
+    cache: &mut CommonMarkCache,
+    text: &str,
+    family: &egui::FontFamily,
+    line_height: f32,
+) {
+    ui.data_mut(|d| d.insert_temp(egui::Id::new("turbo-text-line-height"), line_height));
     ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            for style in [
+                egui::TextStyle::Body,
+                egui::TextStyle::Heading,
+                egui::TextStyle::Button,
+                egui::TextStyle::Small,
+            ] {
+                if let Some(f) = ui.style_mut().text_styles.get_mut(&style) {
+                    f.family = family.clone();
+                }
+            }
             ui.add_space(6.0);
             CommonMarkViewer::new().show(ui, cache, text);
         });

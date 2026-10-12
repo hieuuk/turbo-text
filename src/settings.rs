@@ -24,7 +24,6 @@ pub const DEFAULT_ASSOC_EXTS: [&str; 17] = [
     ".xml",
 ];
 
-const FONTS: [&str; 2] = ["monospace", "proportional"];
 const MODES: [&str; 2] = ["view", "edit"];
 const TAB_SPACES: [u8; 4] = [0, 2, 4, 8];
 const WINDOW_RANGE: std::ops::RangeInclusive<f32> = 300.0..=10000.0;
@@ -42,6 +41,8 @@ pub struct Settings {
     pub highlight: bool,
     pub large_file_mb: u64,
     pub editor_font: String,
+    /// Body font of the rendered Markdown view.
+    pub view_font: String,
     // appearance
     pub theme: String,
     pub ui_scale: f32,
@@ -71,6 +72,7 @@ impl Default for Settings {
             highlight: true,
             large_file_mb: 5,
             editor_font: "monospace".into(),
+            view_font: "proportional".into(),
             theme: "system".into(),
             ui_scale: 1.0,
             open_json: "view".into(),
@@ -123,6 +125,7 @@ impl Settings {
         let d = Settings::default();
         self.theme = d.theme;
         self.ui_scale = d.ui_scale;
+        self.view_font = d.view_font;
     }
 
     pub fn reset_behavior(&mut self) {
@@ -215,7 +218,8 @@ pub fn parse(s: &str) -> Settings {
             .unwrap_or(d.tab_spaces),
         highlight: flag("highlight", d.highlight),
         large_file_mb: uint("large_file_mb").map_or(d.large_file_mb, |n| n.clamp(1, 100)),
-        editor_font: choice("editor_font", &FONTS, &d.editor_font),
+        editor_font: choice("editor_font", &crate::fonts::IDS, &d.editor_font),
+        view_font: choice("view_font", &crate::fonts::IDS, &d.view_font),
         theme: choice("theme", &crate::theme::IDS, &d.theme),
         ui_scale: float("ui_scale").map_or(d.ui_scale, |f| f.clamp(0.75, 2.0)),
         open_json: choice("open_json", &MODES, &d.open_json),
@@ -344,6 +348,41 @@ assoc_exts = [\".x\"]
                 assoc_exts: exts,
                 ..Settings::default()
             }
+        );
+    }
+
+    #[test]
+    fn fonts_accept_every_listed_id_and_fall_back_per_key() {
+        for id in crate::fonts::IDS {
+            let s = parse(&format!(
+                "editor_font = \"{id}\"
+view_font = \"{id}\""
+            ));
+            assert_eq!((s.editor_font.as_str(), s.view_font.as_str()), (id, id));
+        }
+        let s = parse(
+            "editor_font = \"comic-sans\"
+view_font = 3
+",
+        );
+        assert_eq!(
+            (s.editor_font.as_str(), s.view_font.as_str()),
+            ("monospace", "proportional")
+        );
+        let mut s = parse(
+            "view_font = \"georgia\"
+editor_font = \"arial\"",
+        );
+        s.reset_editor();
+        assert_eq!(s.editor_font, "monospace");
+        assert_eq!(
+            s.view_font, "georgia",
+            "reset_editor leaves the Appearance-page font"
+        );
+        s.reset_appearance();
+        assert_eq!(
+            s.view_font, "proportional",
+            "the view font lives on the Appearance page"
         );
     }
 

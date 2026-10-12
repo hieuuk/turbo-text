@@ -39,7 +39,7 @@ pub struct Opts<'a> {
     pub font_size: f32,
     pub read_only: bool,
     pub highlight: bool,
-    pub font_proportional: bool,
+    pub family: egui::FontFamily,
     /// 0 = Tab inserts a real tab; otherwise Tab inserts spaces up to the next tab stop.
     pub tab_spaces: usize,
     pub pal: &'static Palette,
@@ -53,11 +53,7 @@ pub struct Opts<'a> {
 
 /// Returns true if the text was edited.
 pub fn show(ui: &mut Ui, text: &mut String, o: &Opts, cache: &mut HlCache) -> bool {
-    let font = if o.font_proportional {
-        FontId::proportional(o.font_size)
-    } else {
-        FontId::monospace(o.font_size)
-    };
+    let font = FontId::new(o.font_size, o.family.clone());
     let line_height =
         (o.line_height != 1.0).then(|| ui.fonts_mut(|f| f.row_height(&font)) * o.line_height);
     let id = Id::new(EDITOR_ID);

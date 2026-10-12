@@ -5,6 +5,7 @@ mod app;
 mod assoc;
 mod editor;
 mod find;
+mod fonts;
 mod format;
 mod highlight;
 mod io;
