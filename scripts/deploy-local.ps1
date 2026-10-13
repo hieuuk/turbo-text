@@ -21,7 +21,7 @@ New-Item -ItemType Directory -Force $dest | Out-Null
 $firstInstall = -not (Test-Path $exe)
 # keep the previous build for rollback; a running exe can't be overwritten, so stop it first
 if (Test-Path $exe) { Copy-Item $exe "$exe.prev" -Force }
-Get-Process turbo-text -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe } | Stop-Process -Force
+Get-Process turbo-text -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe } | Stop-Process -Force -PassThru | Wait-Process -Timeout 10
 Copy-Item (Join-Path $root 'target\release\turbo-text.exe') $exe -Force
 if ($firstInstall -or $Associate) { & $exe --associate @Exts }
 "installed $exe ($((Get-Item $exe).Length) bytes). Rollback: copy $exe.prev over $exe"
