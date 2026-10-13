@@ -44,6 +44,7 @@ pub fn install(exts: &[String]) -> Result<PathBuf, String> {
 /// installed exe and folder.
 pub fn uninstall(exts: &[String]) -> Result<(), String> {
     assoc::unassociate_in(assoc::CLASSES, exts)?;
+    assoc::remove_prog_in(assoc::CLASSES);
     remove_uninstall_entry(UNINSTALL);
     let exe = installed_exe();
     if exe.exists() {

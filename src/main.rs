@@ -116,10 +116,7 @@ registered file associations and an Apps & features entry
                 Some(0)
             }
             Err(e) => {
-                console_print(&format!(
-                    "error: {e}
-"
-                ));
+                console_print(&format!("error: {e}\n"));
                 Some(1)
             }
         },
@@ -133,21 +130,10 @@ your settings and usage log in %APPDATA%\\turbo-text were kept
                 Some(0)
             }
             Err(e) => {
-                console_print(&format!(
-                    "error: {e}
-"
-                ));
+                console_print(&format!("error: {e}\n"));
                 Some(1)
             }
         },
-        opt if opt.starts_with("--") && !opt.contains('.') && !opt.contains(['\\', '/']) => {
-            console_print(&format!(
-                "unknown option {opt}
-
-{HELP}"
-            ));
-            Some(2)
-        }
         "--stats" => {
             if args.iter().any(|a| a == "--clear") {
                 telemetry::clear(&settings::dir());
@@ -156,6 +142,10 @@ your settings and usage log in %APPDATA%\\turbo-text were kept
                 console_print(&telemetry::stats(&settings::dir()));
             }
             Some(0)
+        }
+        opt if opt.starts_with("--") && !opt.contains('.') && !opt.contains(['\\', '/']) => {
+            console_print(&format!("unknown option {opt}\n\n{HELP}"));
+            Some(2)
         }
         _ => None,
     }
@@ -205,6 +195,16 @@ fn main() -> eframe::Result {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cli_options_are_recognised() {
+        let run = |a: &str| super::run_cli(&[a.to_string()]);
+        assert_eq!(run("--version"), Some(0));
+        assert_eq!(run("--help"), Some(0));
+        assert_eq!(run("--no-such-option"), Some(2));
+        assert_eq!(run("notes.md"), None);
+        assert_eq!(run(r"C:\--odd\file.txt"), None);
+    }
+
     #[test]
     fn window_icon_decodes() {
         let icon = super::window_icon().expect("embedded icon must decode");

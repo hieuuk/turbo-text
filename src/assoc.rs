@@ -110,6 +110,12 @@ pub fn unassociate_in(base: &str, exts: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Deletes the `TurboText.File` handler class itself (used by `--uninstall`, after the per-extension
+/// registrations are removed, since it points at the exe that is being deleted).
+pub fn remove_prog_in(base: &str) {
+    let _ = RegKey::predef(HKEY_CURRENT_USER).delete_subkey_all(prog_key(base));
+}
+
 pub fn is_associated_in(base: &str, ext: &str) -> bool {
     RegKey::predef(HKEY_CURRENT_USER)
         .open_subkey(ext_key(base, ext))
@@ -189,6 +195,9 @@ mod tests {
                 .map(|k| k.get_value::<String, _>("").is_err())
                 .unwrap_or(true)
         );
+
+        remove_prog_in(&base);
+        assert!(hkcu.open_subkey(prog_key(&base)).is_err());
 
         let root =
             base.split('\\').next().unwrap().to_string() + "\\" + base.split('\\').nth(1).unwrap();

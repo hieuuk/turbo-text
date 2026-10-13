@@ -158,10 +158,13 @@ pub fn spawn_self(path: Option<&Path>) {
 
 /// 1-based line and column (in characters) of the character index `at`.
 fn line_col(text: &str, at: usize) -> (usize, usize) {
-    let before: Vec<char> = text.chars().take(at).collect();
-    let line = before.iter().filter(|&&c| c == '\n').count() + 1;
-    let col = before.iter().rev().take_while(|&&c| c != '\n').count() + 1;
-    (line, col)
+    text.chars().take(at).fold((1, 1), |(line, col), c| {
+        if c == '\n' {
+            (line + 1, 1)
+        } else {
+            (line, col + 1)
+        }
+    })
 }
 
 /// Byte offset of the start of 1-based `line`, clamped to the last line.
