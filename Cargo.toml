@@ -1,7 +1,13 @@
 [package]
 name = "turbo-text"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
+description = "Tiny, fast single-file text editor and viewer for Windows (.env, JSON, Markdown, config files)"
+license = "GPL-3.0-only"
+repository = "https://github.com/hieuuk/turbo-text"
+readme = "README.md"
+keywords = ["editor","windows","markdown","json","egui"]
+categories = ["text-editors"]
 
 [dependencies]
 eframe = { version = "0.36.2", default-features = false, features = ["glow", "default_fonts"] }

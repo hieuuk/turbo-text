@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test
+      - run: cargo build --release
+      - name: Package and publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $ver = $tag.TrimStart('v')
+          $zip = "turbo-text-$tag-x86_64.zip"
+          Copy-Item target/release/turbo-text.exe .
+          Compress-Archive -Path turbo-text.exe, README.md, LICENSE, CHANGELOG.md -DestinationPath $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  $zip" | Set-Content -Encoding ascii "$zip.sha256"
+
+          # Notes: the "## [x.y.z]" section of CHANGELOG.md, up to the next "## " heading.
+          $notes = @()
+          $in = $false
+          foreach ($line in Get-Content CHANGELOG.md) {
+            if ($line.StartsWith("## [$ver]")) { $in = $true; continue }
+            if ($in -and $line -like '## *') { break }
+            if ($in) { $notes += $line }
+          }
+          if (-not $notes) { throw "No CHANGELOG section for $ver" }
+          $notes | Set-Content -Encoding utf8 notes.md
+
+          gh release create $tag $zip "$zip.sha256" --title $tag --notes-file notes.md
