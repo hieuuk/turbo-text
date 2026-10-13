@@ -960,6 +960,16 @@ impl eframe::App for App {
             );
             // Debug builds only: lets screenshots of find/scroll/settings run without synthetic keystrokes.
             #[cfg(debug_assertions)]
+            if std::env::var("TT_DEBUG_ABOUT").is_ok() {
+                self.about_open = true;
+            }
+            #[cfg(debug_assertions)]
+            if let Ok(n) = std::env::var("TT_DEBUG_GOTO") {
+                self.open_goto();
+                self.goto.input = n;
+                self.jump_to_line();
+            }
+            #[cfg(debug_assertions)]
             if std::env::var("TT_DEBUG_SETTINGS").is_ok() {
                 self.settings_ui.open();
             }
@@ -1031,8 +1041,7 @@ impl eframe::App for App {
                     "edit"
                 };
                 let pos = (!self.view)
-                    .then(|| editor::cursor_char(&ctx))
-                    .flatten()
+                    .then(|| editor::cursor_char(&ctx).unwrap_or(0))
                     .map(|at| line_col(&self.text, at))
                     .map_or(String::new(), |(l, c)| format!("Ln {l}, Col {c}  |  "));
                 ui.label(
