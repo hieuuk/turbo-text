@@ -11,7 +11,10 @@ use egui_commonmark::CommonMarkCache;
 use serde_json::{Value, json};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
+
+/// How often the open file's modification time is checked for outside changes.
+const DISK_POLL: Duration = Duration::from_secs(1);
 
 /// Settings are written this long after the last change (and on exit), not on every frame.
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(400);
@@ -29,6 +32,13 @@ struct Find {
     matches: Vec<(usize, usize)>,
     cur: Option<usize>,
     key: u64,
+}
+
+#[derive(Default)]
+struct Goto {
+    open: bool,
+    focus: bool,
+    input: String,
 }
 
 pub struct App {
@@ -49,6 +59,13 @@ pub struct App {
     json: Option<(u64, JsonResult)>,
     md: CommonMarkCache,
     find: Find,
+    goto: Goto,
+    about_open: bool,
+    /// Modification time of `path` when it was last loaded or saved by this app.
+    disk_mtime: Option<SystemTime>,
+    last_poll: Instant,
+    /// The file changed on disk while there are unsaved edits; the banner offers Reload / Keep mine.
+    conflict: bool,
     mode_since: Instant,
     started_logged: bool,
     /// ms from `main` until the window and GL context exist (`App::new` runs).
@@ -128,15 +145,52 @@ fn save_label(dirty: bool, has_path: bool) -> Option<&'static str> {
     }
 }
 
-fn spawn_self(path: &Path) {
+/// Starts another TurboText window, on `path` or blank.
+pub fn spawn_self(path: Option<&Path>) {
     if let Ok(exe) = std::env::current_exe() {
-        let _ = std::process::Command::new(exe).arg(path).spawn();
+        let mut cmd = std::process::Command::new(exe);
+        if let Some(p) = path {
+            cmd.arg(p);
+        }
+        let _ = cmd.spawn();
     }
+}
+
+/// 1-based line and column (in characters) of the character index `at`.
+fn line_col(text: &str, at: usize) -> (usize, usize) {
+    let before: Vec<char> = text.chars().take(at).collect();
+    let line = before.iter().filter(|&&c| c == '\n').count() + 1;
+    let col = before.iter().rev().take_while(|&&c| c != '\n').count() + 1;
+    (line, col)
+}
+
+/// Byte offset of the start of 1-based `line`, clamped to the last line.
+fn line_start(text: &str, line: usize) -> usize {
+    let mut start = 0;
+    for _ in 1..line.max(1) {
+        match text[start..].find('\n') {
+            Some(i) => start += i + 1,
+            None => break,
+        }
+    }
+    start
+}
+
+/// True when the file now has a different modification time than we last saw. A file that can no
+/// longer be read (`now` is `None`) is not reported, so a vanished file never nags.
+fn changed_on_disk(seen: Option<SystemTime>, now: Option<SystemTime>) -> bool {
+    now.is_some() && now != seen
+}
+
+fn mtime(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, path: Option<PathBuf>) -> Self {
         let settings = settings::load();
+        // Ctrl +/-/0 change the font size (saved), not egui's unsaved UI zoom
+        cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         apply_visuals(&cc.egui_ctx, &settings);
         let (families, fonts_custom) = apply_fonts(&cc.egui_ctx, &settings, false);
         let tel = telemetry::init(&settings);
@@ -162,6 +216,11 @@ impl App {
             json: None,
             md: CommonMarkCache::default(),
             find: Find::default(),
+            goto: Goto::default(),
+            about_open: false,
+            disk_mtime: None,
+            last_poll: Instant::now(),
+            conflict: false,
             mode_since: Instant::now(),
             started_logged: false,
             init_ms,
@@ -202,6 +261,8 @@ impl App {
             }
         }
         self.path = Some(path.to_path_buf());
+        self.disk_mtime = mtime(path);
+        self.conflict = false;
         self.fmt = format::detect(path);
         self.view = self.settings.start_in_view(self.fmt) && !self.text.trim().is_empty();
         self.dirty = false;
@@ -262,25 +323,37 @@ impl App {
     }
 
     fn save(&mut self) {
+        let path = self
+            .path
+            .clone()
+            .or_else(|| rfd::FileDialog::new().save_file());
+        if let Some(p) = path {
+            self.save_to(p);
+        }
+    }
+
+    fn save_as(&mut self) {
+        let mut dialog = rfd::FileDialog::new();
+        if let Some(name) = self.path.as_ref().and_then(|p| p.file_name()) {
+            dialog = dialog.set_file_name(name.to_string_lossy());
+        }
+        if let Some(p) = dialog.save_file() {
+            self.save_to(p);
+        }
+    }
+
+    fn save_to(&mut self, path: PathBuf) {
         if self.lossy {
             self.banner = Some("Read-only: file is not valid UTF-8, cannot save.".into());
             return;
         }
-        let path = match self
-            .path
-            .clone()
-            .or_else(|| rfd::FileDialog::new().save_file())
-        {
-            Some(p) => p,
-            None => return,
-        };
         match io::save(&path, &self.text, self.eol) {
             Ok(()) => {
-                if self.path.is_none() {
-                    self.fmt = format::detect(&path);
-                    self.path = Some(path);
-                }
+                self.fmt = format::detect(&path);
+                self.disk_mtime = mtime(&path);
+                self.path = Some(path);
                 self.dirty = false;
+                self.conflict = false;
                 self.banner = None;
                 self.tel.event("save", json!({"format": self.fmt.name()}));
             }
@@ -291,6 +364,58 @@ impl App {
                 self.tel
                     .event("save_fail", json!({"err": e.kind().to_string()}));
             }
+        }
+    }
+
+    /// Checks once a second whether the open file changed on disk. A clean buffer reloads
+    /// silently; a buffer with edits is never overwritten, the banner asks instead.
+    fn poll_disk(&mut self, ctx: &egui::Context) {
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+        ctx.request_repaint_after(DISK_POLL);
+        if self.conflict || self.last_poll.elapsed() < DISK_POLL {
+            return;
+        }
+        self.last_poll = Instant::now();
+        if !changed_on_disk(self.disk_mtime, mtime(&path)) {
+            return;
+        }
+        if self.dirty {
+            self.conflict = true;
+        } else {
+            self.reload(&path);
+        }
+    }
+
+    fn reload(&mut self, path: &Path) {
+        let view = self.view;
+        self.load(path, "reload");
+        self.view = view;
+        self.conflict = false;
+        self.banner = Some("File changed on disk: reloaded.".into());
+    }
+
+    fn zoom(&mut self, step: f32) {
+        self.settings.font_size = if step == 0.0 {
+            Settings::default().font_size
+        } else {
+            (self.settings.font_size + step).clamp(6.0, 72.0)
+        };
+    }
+
+    fn open_goto(&mut self) {
+        if self.view && matches!(self.fmt, Format::Json | Format::Markdown) {
+            self.toggle_mode("goto");
+        }
+        self.goto.open = true;
+        self.goto.focus = true;
+    }
+
+    fn jump_to_line(&mut self) {
+        if let Ok(n) = self.goto.input.trim().parse::<usize>() {
+            let at = line_start(&self.text, n);
+            self.select = Some((at, at));
         }
     }
 
@@ -387,6 +512,40 @@ impl App {
     }
 
     fn handle_input(&mut self, ctx: &egui::Context) {
+        let (save_as, new_win, goto, zoom) = ctx.input_mut(|i| {
+            let wheel = i.zoom_delta();
+            let step = if i.consume_key(Modifiers::COMMAND, Key::Num0) {
+                Some(0.0)
+            } else if i.consume_key(Modifiers::COMMAND, Key::Minus) {
+                Some(-1.0)
+            } else if i.consume_key(Modifiers::COMMAND, Key::Plus)
+                || i.consume_key(Modifiers::COMMAND, Key::Equals)
+            {
+                Some(1.0)
+            } else if wheel != 1.0 {
+                Some(if wheel > 1.0 { 1.0 } else { -1.0 })
+            } else {
+                None
+            };
+            (
+                i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::S),
+                i.consume_key(Modifiers::COMMAND, Key::N),
+                i.consume_key(Modifiers::COMMAND, Key::G),
+                step,
+            )
+        });
+        if save_as {
+            self.save_as();
+        }
+        if new_win {
+            spawn_self(None);
+        }
+        if goto {
+            self.open_goto();
+        }
+        if let Some(step) = zoom {
+            self.zoom(step);
+        }
         let (save, open, toggle, find, replace, wrap, settings_key, esc) = ctx.input_mut(|i| {
             (
                 i.consume_key(Modifiers::COMMAND, Key::S),
@@ -396,7 +555,7 @@ impl App {
                 i.consume_key(Modifiers::COMMAND, Key::H),
                 i.consume_key(Modifiers::ALT, Key::Z),
                 i.consume_key(Modifiers::COMMAND, Key::Comma),
-                (self.find.open || self.settings_ui.open)
+                (self.find.open || self.goto.open || self.settings_ui.open || self.about_open)
                     && i.consume_key(Modifiers::NONE, Key::Escape),
             )
         });
@@ -422,9 +581,13 @@ impl App {
             self.settings_ui.open();
         }
         if esc {
-            // Esc closes the settings dialog first; only then the find bar
-            if self.settings_ui.open {
+            // Esc closes dialogs first (About, Settings), then the go-to bar, then the find bar
+            if self.about_open {
+                self.about_open = false;
+            } else if self.settings_ui.open {
                 self.settings_ui.open = false;
+            } else if self.goto.open {
+                self.goto.open = false;
             } else {
                 self.find.open = false;
             }
@@ -506,11 +669,19 @@ impl App {
                     ui.close();
                     self.save();
                 }
+                if ui.button("Save as…    Ctrl+Shift+S").clicked() {
+                    ui.close();
+                    self.save_as();
+                }
+                if ui.button("New window    Ctrl+N").clicked() {
+                    ui.close();
+                    spawn_self(None);
+                }
                 ui.separator();
                 if ui.button("Open settings file").clicked() {
                     ui.close();
                     let _ = self.save_settings();
-                    spawn_self(&settings::path());
+                    spawn_self(Some(&settings::path()));
                 }
                 if ui.button("Settings…    Ctrl+,").clicked() {
                     ui.close();
@@ -555,16 +726,15 @@ impl App {
                     ui.close();
                     self.open_find(true);
                 }
-            });
-            ui.menu_button("Usage log", |ui| {
-                if ui.button("Open log").clicked() {
+                if ui.button("Go to line…    Ctrl+G").clicked() {
                     ui.close();
-                    spawn_self(&settings::dir().join("usage.jsonl"));
+                    self.open_goto();
                 }
-                if ui.button("Clear log").clicked() {
+            });
+            ui.menu_button("Help", |ui| {
+                if ui.button("About and shortcuts").clicked() {
                     ui.close();
-                    telemetry::clear(&settings::dir());
-                    self.banner = Some("Usage log cleared.".into());
+                    self.about_open = true;
                 }
             });
         });
@@ -619,6 +789,67 @@ impl App {
                 self.find.open = false;
             }
         });
+    }
+
+    fn goto_bar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Go to line");
+            let r = ui.add(TextEdit::singleline(&mut self.goto.input).desired_width(80.0));
+            if self.goto.focus {
+                r.request_focus();
+                self.goto.focus = false;
+            }
+            let lines = self.text.bytes().filter(|&b| b == b'\n').count() + 1;
+            ui.label(RichText::new(format!("of {lines}")).weak());
+            if (r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)))
+                || ui.button("Go").clicked()
+            {
+                self.jump_to_line();
+                r.request_focus();
+            }
+            if ui.button("Close").clicked() {
+                self.goto.open = false;
+            }
+        });
+    }
+
+    fn about_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.about_open;
+        egui::Window::new("About TurboText")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.heading(format!("TurboText {}", env!("CARGO_PKG_VERSION")));
+                ui.label("Tiny, fast text editor and viewer for Windows.");
+                ui.label("Free software, GPL-3.0-only. No network access.");
+                ui.hyperlink_to(
+                    "github.com/hieuuk/turbo-text",
+                    "https://github.com/hieuuk/turbo-text",
+                );
+                ui.separator();
+                egui::Grid::new("shortcuts").num_columns(2).show(ui, |ui| {
+                    for (key, what) in [
+                        ("Ctrl+O / Ctrl+S / Ctrl+Shift+S", "Open / Save / Save as"),
+                        ("Ctrl+N", "New window"),
+                        ("Ctrl+E", "Toggle view / edit"),
+                        ("Ctrl+F / Ctrl+H", "Find / Replace"),
+                        ("Ctrl+G", "Go to line"),
+                        (
+                            "Ctrl + / Ctrl - / Ctrl 0",
+                            "Zoom in / out / reset (also Ctrl+wheel)",
+                        ),
+                        ("Alt+Z", "Word wrap"),
+                        ("Ctrl+,", "Settings"),
+                    ] {
+                        ui.label(RichText::new(key).monospace());
+                        ui.label(what);
+                        ui.end_row();
+                    }
+                });
+            });
+        self.about_open = open;
     }
 
     fn apply_assoc(&mut self, req: AssocRequest) {
@@ -709,6 +940,7 @@ impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.handle_input(ctx);
         self.update_title(ctx);
+        self.poll_disk(ctx);
         if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close {
             if !self.settings.confirm_close || self.confirm_discard() {
                 self.allow_close = true;
@@ -744,6 +976,25 @@ impl eframe::App for App {
         }
         let ctx = ui.ctx().clone();
         egui::Panel::top("menu").show(ui, |ui| self.menu(ui));
+        if self.conflict {
+            egui::Panel::top("conflict").show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("This file changed on disk and you have unsaved edits.")
+                            .color(egui::Color32::from_rgb(220, 160, 40)),
+                    );
+                    if ui.button("Reload (lose my edits)").clicked()
+                        && let Some(p) = self.path.clone()
+                    {
+                        self.reload(&p);
+                    }
+                    if ui.button("Keep mine").clicked() {
+                        self.disk_mtime = self.path.as_deref().and_then(mtime);
+                        self.conflict = false;
+                    }
+                });
+            });
+        }
         if let Some(b) = self.banner.clone() {
             egui::Panel::top("banner").show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -753,6 +1004,9 @@ impl eframe::App for App {
                     }
                 });
             });
+        }
+        if self.goto.open {
+            egui::Panel::bottom("goto").show(ui, |ui| self.goto_bar(ui));
         }
         if self.find.open {
             egui::Panel::bottom("find").show(ui, |ui| self.find_bar(ui));
@@ -776,9 +1030,14 @@ impl eframe::App for App {
                 } else {
                     "edit"
                 };
+                let pos = (!self.view)
+                    .then(|| editor::cursor_char(&ctx))
+                    .flatten()
+                    .map(|at| line_col(&self.text, at))
+                    .map_or(String::new(), |(l, c)| format!("Ln {l}, Col {c}  |  "));
                 ui.label(
                     RichText::new(format!(
-                        "{}  |  {}  |  {}  |  {} chars",
+                        "{pos}{}  |  {}  |  {}  |  {} chars",
                         self.fmt.name(),
                         eol,
                         mode,
@@ -789,6 +1048,7 @@ impl eframe::App for App {
             });
         });
         egui::CentralPanel::default().show(ui, |ui| self.body(ui));
+        self.about_window(&ctx);
         if let Some(req) = self.settings_ui.show(&ctx, &mut self.settings) {
             self.apply_assoc(req);
         }
@@ -812,8 +1072,37 @@ impl eframe::App for App {
 
 #[cfg(test)]
 mod tests {
-    use super::{SAVE_DEBOUNCE, save_due, save_label};
-    use std::time::Duration;
+    use super::{SAVE_DEBOUNCE, changed_on_disk, line_col, line_start, save_due, save_label};
+    use std::time::{Duration, SystemTime};
+
+    #[test]
+    fn line_col_counts_from_one_in_characters() {
+        assert_eq!(line_col("", 0), (1, 1));
+        assert_eq!(line_col("ab\ncd", 4), (2, 2));
+        assert_eq!(line_col("ab\n", 3), (2, 1));
+        assert_eq!(line_col("é\nüx", 3), (2, 2));
+        assert_eq!(line_col("ab", 99), (1, 3));
+    }
+
+    #[test]
+    fn line_start_clamps_to_the_text() {
+        let t = "a\nbb\nccc";
+        assert_eq!(line_start(t, 1), 0);
+        assert_eq!(line_start(t, 2), 2);
+        assert_eq!(line_start(t, 3), 5);
+        assert_eq!(line_start(t, 99), 5);
+        assert_eq!(line_start(t, 0), 0);
+    }
+
+    #[test]
+    fn disk_change_needs_a_readable_newer_stamp() {
+        let t0 = SystemTime::UNIX_EPOCH;
+        let t1 = t0 + Duration::from_secs(5);
+        assert!(!changed_on_disk(Some(t0), Some(t0)));
+        assert!(changed_on_disk(Some(t0), Some(t1)));
+        assert!(changed_on_disk(None, Some(t1)));
+        assert!(!changed_on_disk(Some(t0), None));
+    }
 
     #[test]
     fn settings_save_waits_for_quiet_period() {

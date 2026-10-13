@@ -51,6 +51,12 @@ pub struct Opts<'a> {
     pub select: Option<(usize, usize)>,
 }
 
+/// Character index of the editor's caret, if the editor has been shown.
+pub fn cursor_char(ctx: &egui::Context) -> Option<usize> {
+    let state = TextEdit::load_state(ctx, Id::new(EDITOR_ID))?;
+    Some(state.cursor.char_range()?.primary.index.0)
+}
+
 /// Returns true if the text was edited.
 pub fn show(ui: &mut Ui, text: &mut String, o: &Opts, cache: &mut HlCache) -> bool {
     let font = FontId::new(o.font_size, o.family.clone());

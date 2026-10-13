@@ -8,6 +8,7 @@ mod find;
 mod fonts;
 mod format;
 mod highlight;
+mod install;
 mod io;
 mod settings;
 mod settings_ui;
@@ -45,6 +46,18 @@ fn console_print(s: &str) {
     }
 }
 
+const HELP: &str = "TurboText: tiny, fast text editor and viewer for Windows
+
+usage:
+  turbo-text.exe [file]                  open a file (created on save if it does not exist)
+  turbo-text.exe --install               copy to %LOCALAPPDATA%\\Programs\\TurboText, register file types
+  turbo-text.exe --uninstall             remove the installed copy and file types (keeps settings)
+  turbo-text.exe --associate .env .md    register as an \"Open with\" handler (current user)
+  turbo-text.exe --unassociate .env      remove that registration
+  turbo-text.exe --stats [--clear]       summarize or wipe the local usage log
+  turbo-text.exe --version | --help
+";
+
 fn run_cli(args: &[String]) -> Option<i32> {
     let exts = || {
         args[1..]
@@ -78,6 +91,62 @@ fn run_cli(args: &[String]) -> Option<i32> {
                     Some(1)
                 }
             }
+        }
+        "--version" | "-V" => {
+            console_print(&format!(
+                "turbo-text {}
+",
+                env!("CARGO_PKG_VERSION")
+            ));
+            Some(0)
+        }
+        "--help" | "-h" => {
+            console_print(HELP);
+            Some(0)
+        }
+        "--install" => match install::install(&settings::load().assoc_exts) {
+            Ok(exe) => {
+                console_print(&format!(
+                    "installed {}
+registered file associations and an Apps & features entry
+",
+                    exe.display()
+                ));
+                assoc::open_default_apps();
+                Some(0)
+            }
+            Err(e) => {
+                console_print(&format!(
+                    "error: {e}
+"
+                ));
+                Some(1)
+            }
+        },
+        "--uninstall" => match install::uninstall(&settings::load().assoc_exts) {
+            Ok(()) => {
+                console_print(
+                    "removed file associations and the installed copy
+your settings and usage log in %APPDATA%\\turbo-text were kept
+",
+                );
+                Some(0)
+            }
+            Err(e) => {
+                console_print(&format!(
+                    "error: {e}
+"
+                ));
+                Some(1)
+            }
+        },
+        opt if opt.starts_with("--") && !opt.contains('.') && !opt.contains(['\\', '/']) => {
+            console_print(&format!(
+                "unknown option {opt}
+
+{HELP}"
+            ));
+            Some(2)
         }
         "--stats" => {
             if args.iter().any(|a| a == "--clear") {

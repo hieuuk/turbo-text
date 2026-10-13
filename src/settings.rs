@@ -83,7 +83,7 @@ impl Default for Settings {
             window_w: 900.0,
             window_h: 650.0,
             assoc_exts: DEFAULT_ASSOC_EXTS.iter().map(|e| e.to_string()).collect(),
-            telemetry: true,
+            telemetry: false,
             telemetry_max_kb: 2048,
             telemetry_max_days: 90,
         }
@@ -171,7 +171,7 @@ pub fn normalize_ext_list(input: &[String]) -> Vec<String> {
 }
 
 /// Per-field parsing: an invalid or missing value falls back to its own default (clamped where a
-/// range exists) and never discards its neighbours (a bad `theme` can't undo `telemetry = false`).
+/// range exists) and never discards its neighbours (a bad `theme` can't undo `telemetry = true`).
 pub fn parse(s: &str) -> Settings {
     let d = Settings::default();
     let Ok(t) = s.parse::<toml::Table>() else {
@@ -281,7 +281,7 @@ mod tests {
     #[test]
     fn empty_is_defaults() {
         let s = parse("");
-        assert!(!s.wrap && s.show_line_numbers && s.telemetry);
+        assert!(!s.wrap && s.show_line_numbers && !s.telemetry);
         assert_eq!(s.theme, "system");
         assert_eq!(s.font_size, 14.0);
         assert_eq!(s.telemetry_max_kb, 2048);
@@ -293,7 +293,7 @@ mod tests {
         let s = parse("wrap = true\nfont_size = 18.0\n");
         assert!(s.wrap);
         assert_eq!(s.font_size, 18.0);
-        assert!(s.telemetry);
+        assert!(!s.telemetry);
     }
 
     #[test]
@@ -318,11 +318,8 @@ mod tests {
 
     #[test]
     fn one_bad_value_does_not_reset_the_rest() {
-        let s = parse("telemetry = false\ntheme = 5\nwrap = true\nfont_size = \"x\"\n");
-        assert!(
-            !s.telemetry,
-            "telemetry opt-out must survive a bad neighbour"
-        );
+        let s = parse("telemetry = true\ntheme = 5\nwrap = true\nfont_size = \"x\"\n");
+        assert!(s.telemetry, "telemetry opt-in must survive a bad neighbour");
         assert!(s.wrap);
         assert_eq!(s.theme, "system");
         assert_eq!(s.font_size, 14.0);
@@ -524,22 +521,22 @@ editor_font = \"arial\"",
         let mut s = Settings {
             font_size: 30.0,
             theme: "dark".into(),
-            telemetry: false,
+            telemetry: true,
             confirm_close: false,
             ..Default::default()
         };
         s.reset_editor();
         assert_eq!(s.font_size, 14.0);
         assert_eq!(s.theme, "dark");
-        assert!(!s.telemetry);
+        assert!(s.telemetry);
         s.reset_appearance();
         assert_eq!(s.theme, "system");
         assert!(!s.confirm_close);
         s.reset_behavior();
         assert!(s.confirm_close);
-        assert!(!s.telemetry);
-        s.reset_files_privacy();
         assert!(s.telemetry);
+        s.reset_files_privacy();
+        assert!(!s.telemetry);
     }
 
     #[test]

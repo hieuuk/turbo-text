@@ -286,6 +286,14 @@ impl SettingsUi {
                 ui.end_row();
             });
         hint(ui, "Usage log settings apply next launch.");
+        ui.horizontal(|ui| {
+            if ui.button("Open log").clicked() {
+                crate::app::spawn_self(Some(&crate::settings::dir().join("usage.jsonl")));
+            }
+            if ui.button("Clear log").clicked() {
+                crate::telemetry::clear(&crate::settings::dir());
+            }
+        });
         reset_button(ui, || s.reset_files_privacy());
         request
     }

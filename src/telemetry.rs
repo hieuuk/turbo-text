@@ -500,7 +500,13 @@ mod tests {
     #[test]
     fn enabled_writes_events_and_summary() {
         let d = tmp("write");
-        let t = init_in(d.clone(), &Settings::default());
+        let t = init_in(
+            d.clone(),
+            &Settings {
+                telemetry: true,
+                ..Settings::default()
+            },
+        );
         t.add_mode_time("json", true, 2.5);
         t.event("save", json!({"format": "json"}));
         t.shutdown();

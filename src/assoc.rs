@@ -7,7 +7,7 @@ use winreg::RegKey;
 use winreg::enums::*;
 
 pub const PROG_ID: &str = "TurboText.File";
-const CLASSES: &str = "Software\\Classes";
+pub const CLASSES: &str = "Software\\Classes";
 
 pub fn normalize_ext(s: &str) -> String {
     let t = s.trim().trim_start_matches('.').to_ascii_lowercase();
