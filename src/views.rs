@@ -95,6 +95,7 @@ fn node(ui: &mut Ui, key: Option<&str>, v: &Value, path: &str, depth: usize, pal
         });
 }
 
+/// Text sizes scale so the body matches `font_size` (the editor's size setting); headings and code follow.
 /// `line_height` is read by the patched `egui_commonmark_backend` (see `vendor/`) from egui's temp
 /// data; the body text styles use `family`, code blocks stay monospace.
 pub fn markdown(
@@ -102,19 +103,18 @@ pub fn markdown(
     cache: &mut CommonMarkCache,
     text: &str,
     family: &egui::FontFamily,
+    font_size: f32,
     line_height: f32,
 ) {
     ui.data_mut(|d| d.insert_temp(egui::Id::new("turbo-text-line-height"), line_height));
     ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            for style in [
-                egui::TextStyle::Body,
-                egui::TextStyle::Heading,
-                egui::TextStyle::Button,
-                egui::TextStyle::Small,
-            ] {
-                if let Some(f) = ui.style_mut().text_styles.get_mut(&style) {
+            let body = ui.style().text_styles[&egui::TextStyle::Body].size;
+            let scale = font_size / body;
+            for (style, f) in ui.style_mut().text_styles.iter_mut() {
+                f.size *= scale;
+                if *style != egui::TextStyle::Monospace {
                     f.family = family.clone();
                 }
             }

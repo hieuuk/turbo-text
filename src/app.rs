@@ -642,6 +642,7 @@ impl App {
                 &mut self.md,
                 &self.text,
                 &self.families.1,
+                self.settings.font_size,
                 self.settings.line_height,
             );
             return;
