@@ -52,6 +52,8 @@ One file per window. Open another file with `Ctrl+O` or drag it onto the window;
 
 ## Settings
 
+![Settings dialog](docs/img/settings.png)
+
 Open **File > Settings…** (`Ctrl+,`). A sidebar switches between Editor, Appearance (colour themes), Behavior and Files and privacy. Changes apply instantly and are saved automatically; each page has "Reset this page to defaults" and the sidebar has "Reset all to defaults". The file is `%APPDATA%\turbo-text\settings.toml` (File > Open settings file) and can also be edited by hand: every key is validated on its own, so an invalid or out-of-range value falls back to that key's default and never affects the others.
 
 | Key | Values (default) | Applies |
