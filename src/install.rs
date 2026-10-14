@@ -37,7 +37,41 @@ pub fn install(exts: &[String]) -> Result<PathBuf, String> {
     let exe = dest.to_string_lossy().into_owned();
     assoc::associate_in(assoc::CLASSES, exts, &exe)?;
     write_uninstall_entry(UNINSTALL, &exe).map_err(|e| e.to_string())?;
+    create_shortcut(&start_menu_lnk(), &dest)?;
     Ok(dest)
+}
+
+/// Per-user Start Menu entry; Windows Search indexes `.lnk` files here.
+fn start_menu_lnk() -> PathBuf {
+    let base = std::env::var_os("APPDATA").map_or_else(std::env::temp_dir, PathBuf::from);
+    base.join("Microsoft\\Windows\\Start Menu\\Programs\\TurboText.lnk")
+}
+
+/// PowerShell script that writes a shortcut at `lnk` pointing to `exe`.
+fn shortcut_script(lnk: &Path, exe: &Path) -> String {
+    let q = |p: &Path| p.display().to_string().replace('\'', "''");
+    let dir = exe.parent().unwrap_or(exe);
+    format!(
+        "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{}');$s.TargetPath='{}';$s.WorkingDirectory='{}';$s.Save()",
+        q(lnk),
+        q(exe),
+        q(dir)
+    )
+}
+
+// ponytail: shells out to PowerShell/WScript.Shell; use the windows crate's IShellLink if startup cost matters.
+fn create_shortcut(lnk: &Path, exe: &Path) -> Result<(), String> {
+    let status = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command"])
+        .arg(shortcut_script(lnk, exe))
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .map_err(|e| format!("cannot create Start Menu shortcut: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("Start Menu shortcut failed: {status}"))
+    }
 }
 
 /// Removes the associations for `exts`, the uninstall entry and (after this process exits) the
@@ -46,6 +80,7 @@ pub fn uninstall(exts: &[String]) -> Result<(), String> {
     assoc::unassociate_in(assoc::CLASSES, exts)?;
     assoc::remove_prog_in(assoc::CLASSES);
     remove_uninstall_entry(UNINSTALL);
+    let _ = std::fs::remove_file(start_menu_lnk());
     let exe = installed_exe();
     if exe.exists() {
         // a running exe cannot delete itself: a hidden cmd waits a moment, then removes it
@@ -104,6 +139,24 @@ mod tests {
         assert!(c.starts_with("/C \"") && c.ends_with('"'));
         assert!(c.contains("del /f /q \"C:\\Users\\a\\Programs\\TurboText\\turbo-text.exe\""));
         assert!(c.contains("rmdir \"C:\\Users\\a\\Programs\\TurboText\""));
+    }
+
+    /// Real shortcut written to a temp dir, then read back.
+    #[test]
+    fn shortcut_is_created() {
+        let dir = std::env::temp_dir().join("turbotext-lnk-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let lnk = dir.join("it's.lnk");
+        create_shortcut(&lnk, Path::new("C:\\Windows\\notepad.exe")).unwrap();
+        assert!(lnk.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn shortcut_script_escapes_quotes() {
+        let s = shortcut_script(Path::new("C:\\a'b.lnk"), Path::new("C:\\x\\t.exe"));
+        assert!(s.contains("CreateShortcut('C:\\a''b.lnk')"));
+        assert!(s.contains("WorkingDirectory='C:\\x'"));
     }
 
     /// Real registry round trip under a throwaway HKCU key, cleaned up after.

@@ -16,7 +16,7 @@ Windows 10/11, 64-bit. No admin rights needed.
 turbo-text.exe --install
 ```
 
-This copies the exe to `%LOCALAPPDATA%\Programs\TurboText`, adds TurboText to "Open with" for common config and text extensions (list editable in Settings), and adds an entry to Apps & features. `turbo-text.exe --uninstall` (or Apps & features) removes it again and keeps your settings. Or skip installing and just run the exe from anywhere.
+This copies the exe to `%LOCALAPPDATA%\Programs\TurboText`, adds a Start Menu shortcut, adds TurboText to "Open with" for common config and text extensions (list editable in Settings), and adds an entry to Apps & features. `turbo-text.exe --uninstall` (or Apps & features) removes it again and keeps your settings. Or skip installing and just run the exe from anywhere.
 
 **From source:** `cargo build --release` (Rust 1.88 or newer); the exe is `target/release/turbo-text.exe`.
 
