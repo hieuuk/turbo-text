@@ -23,6 +23,13 @@ winreg = "0.56.0"
 [patch.crates-io]
 egui_commonmark_backend = { path = "vendor/egui_commonmark_backend" }
 
+# full debuginfo was most of target/debug (~4 GB); line tables keep file:line in backtraces
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 opt-level = "z"
 lto = true

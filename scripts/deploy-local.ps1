@@ -24,4 +24,6 @@ if (Test-Path $exe) { Copy-Item $exe "$exe.prev" -Force }
 Get-Process turbo-text -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe } | Stop-Process -Force -PassThru | Wait-Process -Timeout 10
 Copy-Item (Join-Path $root 'target\release\turbo-text.exe') $exe -Force
 if ($firstInstall -or $Associate) { & $exe --associate @Exts }
+# idempotent: refreshes the Start Menu shortcut and Apps & features entry (exe already in place)
+& $exe --install | Out-Null
 "installed $exe ($((Get-Item $exe).Length) bytes). Rollback: copy $exe.prev over $exe"
